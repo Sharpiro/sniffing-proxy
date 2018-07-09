@@ -19,6 +19,8 @@ namespace SniffingProxy
 {
     class Program
     {
+        private const string rootCertSerialNumber = "00CC78A90D47D8159A";
+
         private static HttpClient _httpClient;
         private static TcpListener _tcpServer;
 
@@ -26,9 +28,6 @@ namespace SniffingProxy
         {
             try
             {
-                ParseRequest("CONNECT raw.githubusercontent.com:443 HTTP/1.1\r\nHost: raw.githubusercontent.com:443\r\n\r\n");
-                ParseRequest("GET /Sharpiro/Tools/9d490ac97f54388f415c61f4c1889ece00bd169e/interactive_scripts/csi/main.csx HTTP/1.1\r\nHost: raw.githubusercontent.com\r\n\r\n");
-                const string rootCertSerialNumber = "00CC78A90D47D8159A";
                 const string localIp = "127.0.0.1";
                 const int localPort = 5000;
 
@@ -39,17 +38,28 @@ namespace SniffingProxy
                 _tcpServer = new TcpListener(IPAddress.Parse(localIp), localPort);
                 _tcpServer.Start();
 
-                // HandleClients();
+                while (true)
+                {
+                    var clientConnection = await _tcpServer.AcceptTcpClientAsync();
 
-                var clientConnection = await _tcpServer.AcceptTcpClientAsync();
+                    var clientStream = clientConnection.GetStream();
 
-                var clientStream = clientConnection.GetStream();
+                    var cancellationTokenSource = new CancellationTokenSource();
 
-                var cancellationTokenSource = new CancellationTokenSource();
+                    var requestInfo = await Connect(clientStream, clientConnection.ReceiveBufferSize, cancellationTokenSource.Token);
+                    var fakeCert = CreateFakeCertificate(requestInfo.Host, rootCertSerialNumber);
+                    await HandleHttpsRequest(clientStream, clientConnection.ReceiveBufferSize, fakeCert, cancellationTokenSource.Token);
+                }
 
-                var requestInfo = await Connect(clientStream, clientConnection.ReceiveBufferSize, cancellationTokenSource.Token);
-                var fakeCert = CreateFakeCertificate(requestInfo.Host, rootCertSerialNumber);
-                await HandleHttpsRequest(clientStream, clientConnection.ReceiveBufferSize, fakeCert, cancellationTokenSource.Token);
+                // var clientConnection = await _tcpServer.AcceptTcpClientAsync();
+
+                // var clientStream = clientConnection.GetStream();
+
+                // var cancellationTokenSource = new CancellationTokenSource();
+
+                // var requestInfo = await Connect(clientStream, clientConnection.ReceiveBufferSize, cancellationTokenSource.Token);
+                // var fakeCert = CreateFakeCertificate(requestInfo.Host, rootCertSerialNumber);
+                // await HandleHttpsRequest(clientStream, clientConnection.ReceiveBufferSize, fakeCert, cancellationTokenSource.Token);
             }
             catch (Exception ex)
             {
@@ -57,19 +67,6 @@ namespace SniffingProxy
                 _ = ex;
             }
         }
-
-        // static async void HandleClients()
-        // {
-        //     var clientConnection = await _tcpServer.AcceptTcpClientAsync();
-
-        //     var clientStream = clientConnection.GetStream();
-
-        //     var cancellationTokenSource = new CancellationTokenSource();
-
-        //     var requestInfo = await Connect(clientStream, clientConnection.ReceiveBufferSize, cancellationTokenSource.Token);
-        //     var fakeCert = CreateFakeCertificate(requestInfo.Host, rootCertSerialNumber);
-        //     await HandleHttpsRequest(clientStream, clientConnection.ReceiveBufferSize, fakeCert, cancellationTokenSource.Token);
-        // }
 
         // static async Task TcpGetRequest(CancellationToken cancellationToken)
         // {
@@ -103,8 +100,12 @@ namespace SniffingProxy
 
         static async Task HandleHttpsRequest(Stream clientStream, int receiveBufferSize, X509Certificate2 fakeCert, CancellationToken cancellationToken)
         {
+            // var buffer = new byte[65536];
+            // await clientStream.ReadAsync(buffer);
+            // var text = Encoding.UTF8.GetString(buffer);
             var sslStream = new SslStream(clientStream, true);
-            sslStream.AuthenticateAsServer(fakeCert, false, SslProtocols.Tls, true);
+            await sslStream.AuthenticateAsServerAsync(fakeCert, false, SslProtocols.Tls, true);
+            // await sslStream.AuthenticateAsServerAsync(fakeCert, cancellationToken);
 
             var requestText = await ReceiveHttpRequest(sslStream, receiveBufferSize, cancellationToken);
             var request = ParseRequest(requestText);
