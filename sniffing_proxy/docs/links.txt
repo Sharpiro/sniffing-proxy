@@ -1,0 +1,19 @@
+fiddler mim proxy explanation
+    https://stackoverflow.com/a/26649827/5344498
+
+pure .net core 2.0 generate and sign certificate
+    https://stackoverflow.com/a/48210587/5344498
+    https://stackoverflow.com/a/50138133/5344498
+    https://stackoverflow.com/a/44465965/5344498
+
+proxy ssl stream tips
+    https://social.msdn.microsoft.com/Forums/en-US/55563b39-39e9-4412-9169-30c1de7e9ef9/http-proxy-in-c-having-a-problem-with-sslstream-and-also-posting-this-thread?forum=netfxnetcom
+    https://msdn.microsoft.com/en-us/library/system.net.security.sslstream?f=255&MSPPError=-2147217396
+
+openssl
+    create pfx from cert and pk
+        https://stackoverflow.com/a/17284371/5344498
+
+proxy tunnel overview
+    https://tools.ietf.org/html/draft-luotonen-ssl-tunneling-03
+    https://stackoverflow.com/questions/24055036/handle-https-request-in-proxy-server-by-c-sharp-connect-tunnel
