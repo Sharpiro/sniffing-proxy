@@ -17,12 +17,16 @@ const string requestUrl = "https://raw.githubusercontent.com/Sharpiro/Tools/9d49
 var httpClientHandler = new HttpClientHandler { Proxy = new WebProxy(proxyUrl) };
 var httpClient = new HttpClient(httpClientHandler, disposeHandler: true);
 // var httpClient = new HttpClient();
-var res = await httpClient.GetAsync(requestUrl);
-if (res.StatusCode != HttpStatusCode.OK)
-{
-    var reason = await res.Content.ReadAsStringAsync();
-    throw new Exception($"Response was not successful.  Reason: '{reason}'");
-}
 
-var data = await res.Content.ReadAsStringAsync();
-WriteLine(data);
+for (var i = 0; i < 2; i++)
+{
+    var res = await httpClient.GetAsync(requestUrl);
+    if (res.StatusCode != HttpStatusCode.OK)
+    {
+        var reason = await res.Content.ReadAsStringAsync();
+        throw new Exception($"Response was not successful.  Reason: '{reason}'");
+    }
+
+    var data = await res.Content.ReadAsStringAsync();
+    WriteLine(data);
+}

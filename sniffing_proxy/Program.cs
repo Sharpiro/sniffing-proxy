@@ -42,13 +42,14 @@ namespace SniffingProxy
                 {
                     var clientConnection = await _tcpServer.AcceptTcpClientAsync();
 
-                    var clientStream = clientConnection.GetStream();
+                    AcceptClient(clientConnection);
+                    // var clientStream = clientConnection.GetStream();
 
-                    var cancellationTokenSource = new CancellationTokenSource();
+                    // var cancellationTokenSource = new CancellationTokenSource();
 
-                    var requestInfo = await Connect(clientStream, clientConnection.ReceiveBufferSize, cancellationTokenSource.Token);
-                    var fakeCert = CreateFakeCertificate(requestInfo.Host, rootCertSerialNumber);
-                    await HandleHttpsRequest(clientStream, clientConnection.ReceiveBufferSize, fakeCert, cancellationTokenSource.Token);
+                    // var requestInfo = await Connect(clientStream, clientConnection.ReceiveBufferSize, cancellationTokenSource.Token);
+                    // var fakeCert = CreateFakeCertificate(requestInfo.Host, rootCertSerialNumber);
+                    // await HandleHttpsRequest(clientStream, clientConnection.ReceiveBufferSize, fakeCert, cancellationTokenSource.Token);
                 }
 
                 // var clientConnection = await _tcpServer.AcceptTcpClientAsync();
@@ -66,6 +67,18 @@ namespace SniffingProxy
                 Console.Error.WriteLine(ex);
                 _ = ex;
             }
+        }
+
+        static async Task AcceptClient(TcpClient client)
+        {
+            var clientStream = client.GetStream();
+
+            var cancellationTokenSource = new CancellationTokenSource();
+
+            var requestInfo = await Connect(clientStream, client.ReceiveBufferSize, cancellationTokenSource.Token);
+            var fakeCert = CreateFakeCertificate(requestInfo.Host, rootCertSerialNumber);
+
+            await HandleHttpsRequest(clientStream, client.ReceiveBufferSize, fakeCert, cancellationTokenSource.Token);
         }
 
         // static async Task TcpGetRequest(CancellationToken cancellationToken)
@@ -107,17 +120,21 @@ namespace SniffingProxy
             await sslStream.AuthenticateAsServerAsync(fakeCert, false, SslProtocols.Tls, true);
             // await sslStream.AuthenticateAsServerAsync(fakeCert, cancellationToken);
 
-            var requestText = await ReceiveHttpRequest(sslStream, receiveBufferSize, cancellationToken);
-            var request = ParseRequest(requestText);
+            while (true)
+            {
 
-            // modify request here if you'd like, and then forward it to the remote
-            var url = $"https://{request.Host}{request.Path}";
-            var res = await _httpClient.GetAsync(url, cancellationToken);
-            var contentBuffer = await res.Content.ReadAsByteArrayAsync();
+                var requestText = await ReceiveHttpRequest(sslStream, receiveBufferSize, cancellationToken);
+                var request = ParseRequest(requestText);
 
-            var headersBuffer = Encoding.UTF8.GetBytes($"HTTP/1.1 200 OK\r\nContent-Length: {contentBuffer.Length}\r\n\r\n");
-            var allBuffer = headersBuffer.Concat(contentBuffer).ToArray();
-            await sslStream.WriteAsync(allBuffer, cancellationToken);
+                // modify request here if you'd like, and then forward it to the remote
+                var url = $"https://{request.Host}{request.Path}";
+                var res = await _httpClient.GetAsync(url, cancellationToken);
+                var contentBuffer = await res.Content.ReadAsByteArrayAsync();
+
+                var headersBuffer = Encoding.UTF8.GetBytes($"HTTP/1.1 200 OK\r\nContent-Length: {contentBuffer.Length}\r\n\r\n");
+                var allBuffer = headersBuffer.Concat(contentBuffer).ToArray();
+                await sslStream.WriteAsync(allBuffer, cancellationToken);
+            }
         }
 
         static X509Certificate2 CreateFakeCertificate(string fakeCN, string rootCertSerialNumber)
