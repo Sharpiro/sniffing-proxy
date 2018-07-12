@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Buffers;
 using System.Buffers.Text;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net;
@@ -28,6 +29,7 @@ namespace SniffingProxy
         {
             try
             {
+                // ParseRequest("CONNECT raw.githubusercontent.com:443 HTTP/1.1\r\nHost: raw.githubusercontent.com:443\r\n\r\n");
                 const string localIp = "127.0.0.1";
                 const int localPort = 5000;
 
@@ -41,26 +43,9 @@ namespace SniffingProxy
                 while (true)
                 {
                     var clientConnection = await _tcpServer.AcceptTcpClientAsync();
-
                     AcceptClient(clientConnection);
-                    // var clientStream = clientConnection.GetStream();
 
-                    // var cancellationTokenSource = new CancellationTokenSource();
-
-                    // var requestInfo = await Connect(clientStream, clientConnection.ReceiveBufferSize, cancellationTokenSource.Token);
-                    // var fakeCert = CreateFakeCertificate(requestInfo.Host, rootCertSerialNumber);
-                    // await HandleHttpsRequest(clientStream, clientConnection.ReceiveBufferSize, fakeCert, cancellationTokenSource.Token);
                 }
-
-                // var clientConnection = await _tcpServer.AcceptTcpClientAsync();
-
-                // var clientStream = clientConnection.GetStream();
-
-                // var cancellationTokenSource = new CancellationTokenSource();
-
-                // var requestInfo = await Connect(clientStream, clientConnection.ReceiveBufferSize, cancellationTokenSource.Token);
-                // var fakeCert = CreateFakeCertificate(requestInfo.Host, rootCertSerialNumber);
-                // await HandleHttpsRequest(clientStream, clientConnection.ReceiveBufferSize, fakeCert, cancellationTokenSource.Token);
             }
             catch (Exception ex)
             {
@@ -71,14 +56,31 @@ namespace SniffingProxy
 
         static async Task AcceptClient(TcpClient client)
         {
-            var clientStream = client.GetStream();
-
-            var cancellationTokenSource = new CancellationTokenSource();
-
-            var requestInfo = await Connect(clientStream, client.ReceiveBufferSize, cancellationTokenSource.Token);
-            var fakeCert = CreateFakeCertificate(requestInfo.Host, rootCertSerialNumber);
-
-            await HandleHttpsRequest(clientStream, client.ReceiveBufferSize, fakeCert, cancellationTokenSource.Token);
+            try
+            {
+                var clientStream = client.GetStream();
+                var cancellationTokenSource = new CancellationTokenSource();
+                var request = await ReceiveRequest(clientStream, client.ReceiveBufferSize, cancellationTokenSource.Token);
+                Console.WriteLine("Client connected");
+                switch (request.Method)
+                {
+                    case "CONNECT":
+                        await HandleConnectRequest(clientStream, client.ReceiveBufferSize, request, cancellationTokenSource.Token);
+                        var fakeCert = CreateFakeCertificate(request.Host, rootCertSerialNumber);
+                        await HandleHttpsRequest(clientStream, client.ReceiveBufferSize, fakeCert, cancellationTokenSource.Token);
+                        break;
+                    // case "GET":
+                    default:
+                        await HandleHttpConnection(clientStream, client.ReceiveBufferSize, request, cancellationTokenSource.Token);
+                        break;
+                        //  throw new ArgumentOutOfRangeException("Invalid request method");
+                }
+            }
+            catch (Exception ex)
+            {
+                // Console.Error.WriteLine(ex);
+                Console.WriteLine("Client disconnected");
+            }
         }
 
         // static async Task TcpGetRequest(CancellationToken cancellationToken)
@@ -94,46 +96,95 @@ namespace SniffingProxy
         //     var receivedText = Encoding.UTF8.GetString(slice.Span);
         // }
 
-        static async Task<(string Method, string Path, string Version, string Host, int Port)> Connect(NetworkStream clientStream, int receiveBufferSize, CancellationToken cancellationToken)
-        {
+        // static async Task<Request> Connect(NetworkStream clientStream, int receiveBufferSize, CancellationToken cancellationToken)
+        // {
 
+        //     // var buffer = ArrayPool<byte>.Shared.Rent(receiveBufferSize);
+        //     // var clientMemory = buffer.AsMemory();
+
+        //     // var bytesRead = await clientStream.ReadAsync(clientMemory, cancellationToken);
+        //     // var requestText = Encoding.UTF8.GetString(clientMemory.Slice(0, bytesRead).Span);
+        //     // var request = ParseRequest(requestText);
+        //     var request = await ReceiveRequest(clientStream, receiveBufferSize, cancellationToken);
+
+        //     var responseMemory = "HTTP/1.1 200 Connection established\r\n\r\n".AsMemory();
+        //     await WriteResponse(clientStream, responseMemory, cancellationToken);
+        //     // ArrayPool<byte>.Shared.Return(buffer);
+        //     return request;
+        // }
+
+        static async Task<string> ReceiveRequestText(NetworkStream clientStream, int receiveBufferSize, CancellationToken cancellationToken)
+        {
+            var buffer = ArrayPool<byte>.Shared.Rent(receiveBufferSize);
+            var clientMemory = buffer.AsMemory();
+
+            var bytesRead = await clientStream.ReadAsync(clientMemory, cancellationToken);
+            var requestText = Encoding.UTF8.GetString(clientMemory.Slice(0, bytesRead).Span);
+            return requestText;
+        }
+
+        static async Task<Request> ReceiveRequest(NetworkStream clientStream, int receiveBufferSize, CancellationToken cancellationToken)
+        {
             var buffer = ArrayPool<byte>.Shared.Rent(receiveBufferSize);
             var clientMemory = buffer.AsMemory();
 
             var bytesRead = await clientStream.ReadAsync(clientMemory, cancellationToken);
             var requestText = Encoding.UTF8.GetString(clientMemory.Slice(0, bytesRead).Span);
             var request = ParseRequest(requestText);
-            if (request.Method != "CONNECT") throw new InvalidOperationException($"Was expecting 'CONNECT', but instead got '{request.Method}'");
+            return request;
+        }
 
+        static async Task HandleHttpConnection(Stream stream, int receiveBufferSize, Request request, CancellationToken cancellationToken)
+        {
+            var response = await HandleRequest("http", request, cancellationToken);
+            await stream.WriteAsync(response);
+            while (true)
+            {
+                var requestText = await ReceiveHttpRequest(stream, receiveBufferSize, cancellationToken);
+                request = ParseRequest(requestText);
+                response = await HandleRequest("http", request, cancellationToken);
+                await stream.WriteAsync(response);
+            }
+        }
+
+        static async Task<byte[]> HandleRequest(string protocol, Request request, CancellationToken cancellationToken)
+        {
+            var url = protocol == "http" ? $"{request.Path}" : $"{protocol}://{request.Host}{request.Path}";
+            var customRequest = new HttpRequestMessage(new HttpMethod(request.Method), url);
+            foreach (var header in request.Headers)
+            {
+                if (header.Key.ToLowerInvariant().Equals("content-length"))
+                {
+                    continue;
+                }
+                customRequest.Headers.Add(header.Key, header.Value);
+            }
+            var res = await _httpClient.SendAsync(customRequest);
+            var contentBuffer = await res.Content.ReadAsByteArrayAsync();
+            var headersBuffer = Encoding.UTF8.GetBytes($"HTTP/1.1 200 OK\r\nContent-Length: {contentBuffer.Length}\r\n\r\n");
+            var allBuffer = headersBuffer.Concat(contentBuffer).ToArray();
+            return allBuffer;
+        }
+
+        static async Task HandleConnectRequest(Stream clientStream, int receiveBufferSize, Request request, CancellationToken cancellationToken)
+        {
             var responseMemory = "HTTP/1.1 200 Connection established\r\n\r\n".AsMemory();
             await WriteResponse(clientStream, responseMemory, cancellationToken);
-            ArrayPool<byte>.Shared.Return(buffer);
-            return request;
         }
 
         static async Task HandleHttpsRequest(Stream clientStream, int receiveBufferSize, X509Certificate2 fakeCert, CancellationToken cancellationToken)
         {
-            // var buffer = new byte[65536];
-            // await clientStream.ReadAsync(buffer);
-            // var text = Encoding.UTF8.GetString(buffer);
             var sslStream = new SslStream(clientStream, true);
             await sslStream.AuthenticateAsServerAsync(fakeCert, false, SslProtocols.Tls, true);
-            // await sslStream.AuthenticateAsServerAsync(fakeCert, cancellationToken);
 
             while (true)
             {
-
                 var requestText = await ReceiveHttpRequest(sslStream, receiveBufferSize, cancellationToken);
                 var request = ParseRequest(requestText);
 
                 // modify request here if you'd like, and then forward it to the remote
-                var url = $"https://{request.Host}{request.Path}";
-                var res = await _httpClient.GetAsync(url, cancellationToken);
-                var contentBuffer = await res.Content.ReadAsByteArrayAsync();
-
-                var headersBuffer = Encoding.UTF8.GetBytes($"HTTP/1.1 200 OK\r\nContent-Length: {contentBuffer.Length}\r\n\r\n");
-                var allBuffer = headersBuffer.Concat(contentBuffer).ToArray();
-                await sslStream.WriteAsync(allBuffer, cancellationToken);
+                var res = await HandleRequest("https", request, cancellationToken);
+                await sslStream.WriteAsync(res, cancellationToken);
             }
         }
 
@@ -186,7 +237,7 @@ namespace SniffingProxy
             return request;
         }
 
-        static async Task WriteResponse(NetworkStream clientStream, ReadOnlyMemory<char> charMemory, CancellationToken cancellationToken)
+        static async Task WriteResponse(Stream clientStream, ReadOnlyMemory<char> charMemory, CancellationToken cancellationToken)
         {
             var rentedBuffer = ArrayPool<byte>.Shared.Rent(charMemory.Length);
             var byteMemory = rentedBuffer.AsMemory();
@@ -197,58 +248,74 @@ namespace SniffingProxy
         }
 
 
-        // static (string Method, string Path, string Version, string Host, int Port) ParseRequest(string requestText)
-        // {
-        //     var lines = requestText.Split("\r\n");
-        //     var linesAndSpaces = lines.Select(l => l.Split(" ")).ToArray();
-        //     var hostAndPort = linesAndSpaces[1][1].Split(':');
-        //     var request =
-        //     (
-        //         Method: linesAndSpaces[0][0],
-        //         Path: linesAndSpaces[0][1],
-        //         Version: linesAndSpaces[0][2],
-        //         Host: hostAndPort[0],
-        //         Port: hostAndPort.Length > 1 ? int.Parse(hostAndPort[1]) : -1
-        //     );
-        //     return request;
-        // }
-
-        static (string Method, string Path, string Version, string Host, int Port) ParseRequest(ReadOnlySpan<char> requestSpan)
+        static Request ParseRequest(string requestText)
         {
-            var index = requestSpan.IndexOf(' ');
-            var method = requestSpan.Slice(0, index);
-
-            requestSpan = requestSpan.Slice(index + 1, requestSpan.Length - index - 1);
-            index = requestSpan.IndexOf(' ');
-            var path = requestSpan.Slice(0, index);
-
-            requestSpan = requestSpan.Slice(index + 1, requestSpan.Length - index - 1);
-            index = requestSpan.IndexOf('\r');
-            var version = requestSpan.Slice(0, index);
-
-            requestSpan = requestSpan.Slice(index + 2, requestSpan.Length - index - 2);
-            index = requestSpan.IndexOf(' ');
-            var endIndex = requestSpan.IndexOf('\r');
-            var hostAndPort = requestSpan.Slice(index + 1, endIndex - index - 1);
-
-            int port = -1;
-            var host = hostAndPort;
-            index = hostAndPort.IndexOf(':');
-            if (index >= 0) // has a port
+            var temp = requestText.Split("\r\n\r\n");
+            var lines = temp[0].Split("\r\n");
+            var linesAndSpaces = lines.First().Split(" ");
+            var headerLines = lines.Skip(1).Where(l => !string.IsNullOrEmpty(l)).Select(l => l.Split(':', 2, StringSplitOptions.RemoveEmptyEntries).Select(s => s.Trim()));
+            var headers = headerLines.ToDictionary(kvp => kvp.First(), kvp => kvp.Last(), StringComparer.InvariantCultureIgnoreCase);
+            var hostAndPort = headers["host"].Split(":");
+            var request = new Request
             {
-                host = hostAndPort.Slice(0, index);
-                port = int.Parse(hostAndPort.Slice(index + 1, hostAndPort.Length - index - 1));
-            }
-
-            var request =
-           (
-               Method: method.ToString(),
-               Path: path.ToString(),
-               Version: version.ToString(),
-               Host: host.ToString(),
-               Port: port
-           );
+                Method = linesAndSpaces[0],
+                Path = linesAndSpaces[1],
+                Version = linesAndSpaces[2],
+                Host = hostAndPort[0],
+                Port = hostAndPort.Length > 1 ? int.Parse(hostAndPort[1]) : -1,
+                Headers = headers,
+                Body = temp[1]
+            };
             return request;
         }
+
+        //         static Request ParseRequest(ReadOnlySpan<char> requestSpan)
+        //         {
+        //             var index = requestSpan.IndexOf(' ');
+        //             var method = requestSpan.Slice(0, index);
+
+        //             requestSpan = requestSpan.Slice(index + 1, requestSpan.Length - index - 1);
+        //             index = requestSpan.IndexOf(' ');
+        //             var path = requestSpan.Slice(0, index);
+
+        //             requestSpan = requestSpan.Slice(index + 1, requestSpan.Length - index - 1);
+        //             index = requestSpan.IndexOf('\r');
+        //             var version = requestSpan.Slice(0, index);
+
+        //             requestSpan = requestSpan.Slice(index + 2, requestSpan.Length - index - 2);
+        //             index = requestSpan.IndexOf(' ');
+        //             var endIndex = requestSpan.IndexOf('\r');
+        //             var hostAndPort = requestSpan.Slice(index + 1, endIndex - index - 1);
+
+        //             int port = -1;
+        //             var host = hostAndPort;
+        //             index = hostAndPort.IndexOf(':');
+        //             if (index >= 0) // has a port
+        //             {
+        //                 host = hostAndPort.Slice(0, index);
+        //                 port = int.Parse(hostAndPort.Slice(index + 1, hostAndPort.Length - index - 1));
+        //             }
+
+        //             var request = new Request
+        //             {
+        //                 Method = method.ToString(),
+        //                 Path = path.ToString(),
+        //                 Version = version.ToString(),
+        //                 Host = host.ToString(),
+        //                 Port = port
+        //             };
+        //             return request;
+        //         }
     }
+}
+
+public class Request
+{
+    public string Method { get; set; }
+    public string Path { get; set; }
+    public string Version { get; set; }
+    public string Host { get; set; }
+    public int Port { get; set; }
+    public Dictionary<string, string> Headers { get; set; }
+    public string Body { get; set; }
 }
