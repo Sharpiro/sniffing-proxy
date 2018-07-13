@@ -15,12 +15,15 @@ using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Newtonsoft.Json;
+using System.IO.Compression;
 
 namespace SniffingProxy
 {
     class Program
     {
-        private const string rootCertSerialNumber = "00CC78A90D47D8159A";
+        // private const string rootCertSerialNumber = "00CC78A90D47D8159A";
+        private const string rootCertSerialNumber = "00ed57f3562fd3d663";
 
         private static HttpClient _httpClient;
         private static TcpListener _tcpServer;
@@ -34,8 +37,20 @@ namespace SniffingProxy
                 const int localPort = 5000;
 
                 var proxyUrl = Environment.GetEnvironmentVariable("http_proxy");
-                var httpClientHandler = new HttpClientHandler { Proxy = new WebProxy(proxyUrl) };
+                var httpClientHandler = new HttpClientHandler
+                {
+                    // Proxy = new WebProxy(proxyUrl),
+                    // AllowAutoRedirect = false
+                };
                 _httpClient = new HttpClient(httpClientHandler, disposeHandler: true);
+
+
+                // var requestJson = "{\"Method\":\"GET\",\"Path\":\"/\",\"Version\":\"HTTP/1.1\",\"Host\":\"gmail.com\",\"Port\":-1,\"Headers\":{\"User-Agent\":\"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/64.0.3282.140 Safari/537.36 Edge/17.17134\",\"Accept-Language\":\"en-US\",\"Accept\":\"text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8\",\"Upgrade-Insecure-Requests\":\"1\",\"Accept-Encoding\":\"gzip, deflate, br\",\"Host\":\"gmail.com\",\"Connection\":\"Keep-Alive\",\"Cache-Control\":\"no-cache\"},\"Body\":\"\"}";
+                // var request = JsonConvert.DeserializeObject<Request>(requestJson);
+                // var x = await HandleRequest("https", request, CancellationToken.None);
+
+                // var handler = new HttpClientHandler { AllowAutoRedirect = false };
+                // var res = await new HttpClient(handler).GetAsync("https://mail.google.com/mail/");
 
                 _tcpServer = new TcpListener(IPAddress.Parse(localIp), localPort);
                 _tcpServer.Start();
@@ -157,12 +172,37 @@ namespace SniffingProxy
                 {
                     continue;
                 }
+                // if (header.Key.ToLowerInvariant().Equals("accept-encoding"))
+                // {
+                //     continue;
+                // }
                 customRequest.Headers.Add(header.Key, header.Value);
             }
-            var res = await _httpClient.SendAsync(customRequest);
+            // var res = await _httpClient.SendAsync(customRequest);
+
+            var handler = new HttpClientHandler { AllowAutoRedirect = false };
+            // var res2 = await new HttpClient(handler).GetAsync(url);
+            var res = await new HttpClient(handler).SendAsync(customRequest);
+
+            var responseHeaders = res.Headers.ToString();
+            var tempContent = await res.Content.ReadAsStringAsync();
             var contentBuffer = await res.Content.ReadAsByteArrayAsync();
-            var headersBuffer = Encoding.UTF8.GetBytes($"HTTP/1.1 200 OK\r\nContent-Length: {contentBuffer.Length}\r\n\r\n");
+            try
+            {
+                var uncompressedStream = new MemoryStream();
+                var streamBuffer = await res.Content.ReadAsStreamAsync();
+                var gzipStream = new GZipStream(streamBuffer, CompressionMode.Decompress);
+                gzipStream.CopyTo(uncompressedStream);
+                var data = Encoding.UTF8.GetString(uncompressedStream.ToArray());
+            }
+            catch (Exception ex)
+            {
+
+            }
+            // var headersBuffer = Encoding.UTF8.GetBytes($"HTTP/1.1 {(int)res.StatusCode}\r\n{responseHeaders}Content-Length: {contentBuffer.Length}\r\n\r\n");
+            var headersBuffer = Encoding.UTF8.GetBytes($"HTTP/1.1 {(int)res.StatusCode}\r\n{responseHeaders}\r\n\r\n");
             var allBuffer = headersBuffer.Concat(contentBuffer).ToArray();
+            var rawTemp = Encoding.UTF8.GetString(allBuffer);
             return allBuffer;
         }
 
@@ -192,7 +232,7 @@ namespace SniffingProxy
         {
             var userStore = new X509Store(StoreName.Root, StoreLocation.CurrentUser);
             userStore.Open(OpenFlags.MaxAllowed);
-            var rootCert = userStore.Certificates.Cast<X509Certificate2>().Single(c => c.SerialNumber == rootCertSerialNumber);
+            var rootCert = userStore.Certificates.Cast<X509Certificate2>().Single(c => c.SerialNumber.Equals(rootCertSerialNumber, StringComparison.InvariantCultureIgnoreCase));
             using (var rsa = RSA.Create(2048))
             {
                 var req = new CertificateRequest($"CN={fakeCN}", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
@@ -266,6 +306,7 @@ namespace SniffingProxy
                 Headers = headers,
                 Body = temp[1]
             };
+            var jsonRequest = Newtonsoft.Json.JsonConvert.SerializeObject(request);
             return request;
         }
 
