@@ -17,6 +17,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
 using System.IO.Compression;
+using SniffingProxy.Core;
 
 namespace SniffingProxy
 {
@@ -27,6 +28,7 @@ namespace SniffingProxy
 
         private static HttpClient _httpClient;
         private static TcpListener _tcpServer;
+        private static CertificateService _certificateService = new CertificateService();
 
         static async Task Main(string[] args)
         {
@@ -43,7 +45,8 @@ namespace SniffingProxy
                     // AllowAutoRedirect = false
                 };
                 _httpClient = new HttpClient(httpClientHandler, disposeHandler: true);
-
+                // var customHttpsClient = new CustomHttpsClient();
+                // customHttpsClient.HandleConnect();
 
                 // var requestJson = "{\"Method\":\"GET\",\"Path\":\"/\",\"Version\":\"HTTP/1.1\",\"Host\":\"gmail.com\",\"Port\":-1,\"Headers\":{\"User-Agent\":\"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/64.0.3282.140 Safari/537.36 Edge/17.17134\",\"Accept-Language\":\"en-US\",\"Accept\":\"text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8\",\"Upgrade-Insecure-Requests\":\"1\",\"Accept-Encoding\":\"gzip, deflate, br\",\"Host\":\"gmail.com\",\"Connection\":\"Keep-Alive\",\"Cache-Control\":\"no-cache\"},\"Body\":\"\"}";
                 // var request = JsonConvert.DeserializeObject<Request>(requestJson);
@@ -81,7 +84,7 @@ namespace SniffingProxy
                 {
                     case "CONNECT":
                         await HandleConnectRequest(clientStream, client.ReceiveBufferSize, request, cancellationTokenSource.Token);
-                        var fakeCert = CreateFakeCertificate(request.Host, rootCertSerialNumber);
+                        var fakeCert = _certificateService.CreateFakeCertificate(request.Host, rootCertSerialNumber);
                         await HandleHttpsRequest(clientStream, request, client.ReceiveBufferSize, fakeCert, cancellationTokenSource.Token);
                         break;
                     // case "GET":
@@ -145,7 +148,7 @@ namespace SniffingProxy
 
             var bytesRead = await clientStream.ReadAsync(clientMemory, cancellationToken);
             var requestText = Encoding.UTF8.GetString(clientMemory.Slice(0, bytesRead).Span);
-            var request = ParseRequest(requestText);
+            var request = Request.Parse(requestText);
             return request;
         }
 
@@ -156,7 +159,7 @@ namespace SniffingProxy
             while (true)
             {
                 var requestText = await ReceiveHttpRequestText(stream, receiveBufferSize, cancellationToken);
-                request = ParseRequest(requestText);
+                request = Request.Parse(requestText);
                 response = await HandleRequest("http", request, cancellationToken);
                 await stream.WriteAsync(response);
             }
@@ -274,32 +277,6 @@ namespace SniffingProxy
 
             // await clientSslStream.WriteAsync(serverResponse, cancellationToken);
         }
-
-        static X509Certificate2 CreateFakeCertificate(string fakeCN, string rootCertSerialNumber)
-        {
-            var userStore = new X509Store(StoreName.Root, StoreLocation.CurrentUser);
-            userStore.Open(OpenFlags.MaxAllowed);
-            var rootCert = userStore.Certificates.Cast<X509Certificate2>().Single(c => c.SerialNumber.Equals(rootCertSerialNumber, StringComparison.InvariantCultureIgnoreCase));
-            using (var rsa = RSA.Create(2048))
-            {
-                var req = new CertificateRequest($"CN={fakeCN}", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
-
-                req.CertificateExtensions.Add(new X509BasicConstraintsExtension(false, false, 0, false));
-                req.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.KeyEncipherment | X509KeyUsageFlags.DigitalSignature, false));
-                req.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension(new OidCollection {
-                     new Oid("1.3.6.1.5.5.7.3.1") , // server auth
-                     new Oid("1.3.6.1.5.5.7.3.2") // client auth
-                     }, true));
-                req.CertificateExtensions.Add(new X509SubjectKeyIdentifierExtension(req.PublicKey, false));
-
-                // https://github.com/dotnet/corefx/issues/24454#issuecomment-388231655
-                var corruptFakeCert = req.Create(rootCert, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddDays(90), new byte[] { 1, 2, 3, 4 }).CopyWithPrivateKey(rsa);
-                var fixedFakeCert = new X509Certificate2(corruptFakeCert.Export(X509ContentType.Pkcs12));
-
-                return fixedFakeCert;
-            }
-        }
-
         // static async Task<byte[]> ReceiveHttpRequestBytesSimple(Stream sourceStream, int bufferSize, CancellationToken cancellationToken)
         // {
         //     var allBytes
@@ -371,27 +348,27 @@ namespace SniffingProxy
         }
 
 
-        static Request ParseRequest(string requestText)
-        {
-            var temp = requestText.Split("\r\n\r\n");
-            var lines = temp[0].Split("\r\n");
-            var linesAndSpaces = lines.First().Split(" ");
-            var headerLines = lines.Skip(1).Where(l => !string.IsNullOrEmpty(l)).Select(l => l.Split(':', 2, StringSplitOptions.RemoveEmptyEntries).Select(s => s.Trim()));
-            var headers = headerLines.ToDictionary(kvp => kvp.First(), kvp => kvp.Last(), StringComparer.InvariantCultureIgnoreCase);
-            var hostAndPort = headers["host"].Split(":");
-            var request = new Request
-            {
-                Method = linesAndSpaces[0],
-                Path = linesAndSpaces[1],
-                Version = linesAndSpaces[2],
-                Host = hostAndPort[0],
-                Port = hostAndPort.Length > 1 ? int.Parse(hostAndPort[1]) : -1,
-                Headers = headers,
-                Body = temp[1]
-            };
-            var jsonRequest = Newtonsoft.Json.JsonConvert.SerializeObject(request);
-            return request;
-        }
+        // static Request ParseRequest(string requestText)
+        // {
+        //     var temp = requestText.Split("\r\n\r\n");
+        //     var lines = temp[0].Split("\r\n");
+        //     var linesAndSpaces = lines.First().Split(" ");
+        //     var headerLines = lines.Skip(1).Where(l => !string.IsNullOrEmpty(l)).Select(l => l.Split(':', 2, StringSplitOptions.RemoveEmptyEntries).Select(s => s.Trim()));
+        //     var headers = headerLines.ToDictionary(kvp => kvp.First(), kvp => kvp.Last(), StringComparer.InvariantCultureIgnoreCase);
+        //     var hostAndPort = headers["host"].Split(":");
+        //     var request = new Request
+        //     {
+        //         Method = linesAndSpaces[0],
+        //         Path = linesAndSpaces[1],
+        //         Version = linesAndSpaces[2],
+        //         Host = hostAndPort[0],
+        //         Port = hostAndPort.Length > 1 ? int.Parse(hostAndPort[1]) : -1,
+        //         Headers = headers,
+        //         Body = temp[1]
+        //     };
+        //     var jsonRequest = Newtonsoft.Json.JsonConvert.SerializeObject(request);
+        //     return request;
+        // }
 
         //         static Request ParseRequest(ReadOnlySpan<char> requestSpan)
         //         {
@@ -431,15 +408,4 @@ namespace SniffingProxy
         //             return request;
         //         }
     }
-}
-
-public class Request
-{
-    public string Method { get; set; }
-    public string Path { get; set; }
-    public string Version { get; set; }
-    public string Host { get; set; }
-    public int Port { get; set; }
-    public Dictionary<string, string> Headers { get; set; }
-    public string Body { get; set; }
 }
