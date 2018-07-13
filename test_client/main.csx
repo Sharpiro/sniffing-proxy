@@ -20,12 +20,13 @@ var httpClient = new HttpClient(httpClientHandler, disposeHandler: true);
 
 var requestList = new string[]
 {
-    "https://raw.githubusercontent.com/Sharpiro/Tools/master/.gitignore",
-    "http://www.httpvshttps.com/",
-    "https://raw.githubusercontent.com/Sharpiro/Tools/master/.gitignore",
-    "https://en.wikipedia.org/wiki/EICAR_test_file",
-    "http://www.httpvshttps.com/",
-    "http://www.httpvshttps.com/",
+    "https://github.com/Sharpiro/Tools/blob/9d490ac97f54388f415c61f4c1889ece00bd169e/interactive_scripts/csi/main.csx",
+    "https://github.com/Sharpiro/Tools/blob/9d490ac97f54388f415c61f4c1889ece00bd169e/interactive_scripts/csi/main.csx",
+    // "http://www.httpvshttps.com/",
+    // "https://raw.githubusercontent.com/Sharpiro/Tools/master/.gitignore",
+    // "https://en.wikipedia.org/wiki/EICAR_test_file",
+    // "http://www.httpvshttps.com/",
+    // "http://www.httpvshttps.com/",
 };
 
 foreach (var url in requestList)
@@ -41,6 +42,7 @@ foreach (var url in requestList)
     var data = await res.Content.ReadAsStringAsync();
 
     WriteLine($"success: {url}");
+    // WriteLine(data);
 }
 // var res = await httpClient.GetAsync(requestUrl);
 // var res = await httpClient.GetAsync("http://www.httpvshttps.com/");

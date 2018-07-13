@@ -82,7 +82,7 @@ namespace SniffingProxy
                     case "CONNECT":
                         await HandleConnectRequest(clientStream, client.ReceiveBufferSize, request, cancellationTokenSource.Token);
                         var fakeCert = CreateFakeCertificate(request.Host, rootCertSerialNumber);
-                        await HandleHttpsRequest(clientStream, client.ReceiveBufferSize, fakeCert, cancellationTokenSource.Token);
+                        await HandleHttpsRequest(clientStream, request, client.ReceiveBufferSize, fakeCert, cancellationTokenSource.Token);
                         break;
                     // case "GET":
                     default:
@@ -155,7 +155,7 @@ namespace SniffingProxy
             await stream.WriteAsync(response);
             while (true)
             {
-                var requestText = await ReceiveHttpRequest(stream, receiveBufferSize, cancellationToken);
+                var requestText = await ReceiveHttpRequestText(stream, receiveBufferSize, cancellationToken);
                 request = ParseRequest(requestText);
                 response = await HandleRequest("http", request, cancellationToken);
                 await stream.WriteAsync(response);
@@ -187,18 +187,18 @@ namespace SniffingProxy
             var responseHeaders = res.Headers.ToString();
             var tempContent = await res.Content.ReadAsStringAsync();
             var contentBuffer = await res.Content.ReadAsByteArrayAsync();
-            try
-            {
-                var uncompressedStream = new MemoryStream();
-                var streamBuffer = await res.Content.ReadAsStreamAsync();
-                var gzipStream = new GZipStream(streamBuffer, CompressionMode.Decompress);
-                gzipStream.CopyTo(uncompressedStream);
-                var data = Encoding.UTF8.GetString(uncompressedStream.ToArray());
-            }
-            catch (Exception ex)
-            {
+            // try
+            // {
+            //     var uncompressedStream = new MemoryStream();
+            //     var streamBuffer = await res.Content.ReadAsStreamAsync();
+            //     var gzipStream = new GZipStream(streamBuffer, CompressionMode.Decompress);
+            //     gzipStream.CopyTo(uncompressedStream);
+            //     var data = Encoding.UTF8.GetString(uncompressedStream.ToArray());
+            // }
+            // catch (Exception ex)
+            // {
 
-            }
+            // }
             // var headersBuffer = Encoding.UTF8.GetBytes($"HTTP/1.1 {(int)res.StatusCode}\r\n{responseHeaders}Content-Length: {contentBuffer.Length}\r\n\r\n");
             var headersBuffer = Encoding.UTF8.GetBytes($"HTTP/1.1 {(int)res.StatusCode}\r\n{responseHeaders}\r\n\r\n");
             var allBuffer = headersBuffer.Concat(contentBuffer).ToArray();
@@ -212,20 +212,67 @@ namespace SniffingProxy
             await WriteResponse(clientStream, responseMemory, cancellationToken);
         }
 
-        static async Task HandleHttpsRequest(Stream clientStream, int receiveBufferSize, X509Certificate2 fakeCert, CancellationToken cancellationToken)
+        static async Task HandleHttpsRequest(Stream clientStream, Request request, int receiveBufferSize, X509Certificate2 fakeCert, CancellationToken cancellationToken)
         {
-            var sslStream = new SslStream(clientStream, true);
-            await sslStream.AuthenticateAsServerAsync(fakeCert, false, SslProtocols.Tls, true);
+            var clientSslStream = new SslStream(clientStream, true);
+            await clientSslStream.AuthenticateAsServerAsync(fakeCert, false, SslProtocols.Tls, true);
+            var remoteClient = new TcpClient(request.Host, request.Port);
+            var remoteStream = remoteClient.GetStream();
+            var remoteSslStream = new SslStream(remoteStream, true);
+            await remoteSslStream.AuthenticateAsClientAsync(request.Host);
+
+            // var clientBuffer = new byte[receiveBufferSize];
+
+            // var clientBytesRead = -1;
+            // while (clientBytesRead != 0)
+            // {
+            //     clientBytesRead = await clientSslStream.ReadAsync(clientBuffer, 0, clientBuffer.Length);
+            //     await remoteSslStream.WriteAsync(clientBuffer, 0, clientBytesRead);
+            // }
 
             while (true)
             {
-                var requestText = await ReceiveHttpRequest(sslStream, receiveBufferSize, cancellationToken);
-                var request = ParseRequest(requestText);
+                var requestBytes = await ReceiveHttpRequestBytes(clientSslStream, receiveBufferSize * 2, cancellationToken);
+                var tempText = Encoding.UTF8.GetString(requestBytes);
+                await remoteSslStream.WriteAsync(requestBytes, 0, requestBytes.Length);
 
-                // modify request here if you'd like, and then forward it to the remote
-                var res = await HandleRequest("https", request, cancellationToken);
-                await sslStream.WriteAsync(res, cancellationToken);
+                var responseBytes = await ReceiveHttpRequestBytes(remoteSslStream, receiveBufferSize * 2, cancellationToken);
+                var tempText2 = Encoding.UTF8.GetString(responseBytes);
+                await remoteSslStream.WriteAsync(responseBytes, 0, responseBytes.Length);
+
+                // var remoteBuffer = new byte[receiveBufferSize];
+                // var remoteBytesRead = -1;
+                // var counter = 0;
+                // while (remoteBytesRead != 0)
+                // {
+                //     remoteBytesRead = await remoteSslStream.ReadAsync(remoteBuffer, 0, remoteBuffer.Length);
+                //     await clientSslStream.WriteAsync(remoteBuffer, 0, remoteBytesRead);
+                //     if (counter == 48)
+                //     {
+
+                //     }
+                //     counter++;
+                // }
+                // var x = 5;
             }
+
+
+            // var requestText = await ReceiveHttpRequestText(sslStream, receiveBufferSize, cancellationToken);
+            // var request = ParseRequest(requestText);
+            // var requestBytes = await ReceiveHttpRequestBytes(clientSslStream, receiveBufferSize, cancellationToken);
+            // var tempText = Encoding.UTF8.GetString(requestBytes);
+
+            // await remoteSslStream.WriteAsync(requestBytes, 0, requestBytes.Length);
+            // await remoteSslStream.FlushAsync();
+
+            // var serverResponse = await ReceiveHttpRequestBytes(remoteSslStream, receiveBufferSize, cancellationToken);
+            // var tempText2 = Encoding.UTF8.GetString(serverResponse);
+
+
+            // modify request here if you'd like, and then forward it to the remote
+            // var res = await HandleRequest("https", request, cancellationToken);
+
+            // await clientSslStream.WriteAsync(serverResponse, cancellationToken);
         }
 
         static X509Certificate2 CreateFakeCertificate(string fakeCN, string rootCertSerialNumber)
@@ -253,7 +300,43 @@ namespace SniffingProxy
             }
         }
 
-        static async Task<string> ReceiveHttpRequest(Stream sourceStream, int bufferSize, CancellationToken cancellationToken)
+        // static async Task<byte[]> ReceiveHttpRequestBytesSimple(Stream sourceStream, int bufferSize, CancellationToken cancellationToken)
+        // {
+        //     var allBytes
+        //     var memory = new Memory<byte>(new byte[bufferSize]);
+        //     while (true)
+        //     {
+        //         var bytesRead = await sourceStream.ReadAsync(memory, cancellationToken);
+
+        //     }
+        //     memory = memory.Slice(0, bytesRead);
+        //     return memory.ToArray();
+        // }
+
+        static async Task<byte[]> ReceiveHttpRequestBytes(Stream sourceStream, int bufferSize, CancellationToken cancellationToken)
+        {
+            var buffer = ArrayPool<byte>.Shared.Rent(bufferSize);
+            var bufferIndex = 0;
+            var totalBytesRead = 0;
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                var bytesRead = await sourceStream.ReadAsync(buffer, bufferIndex, buffer.Length - bufferIndex, cancellationToken);
+                bufferIndex = bytesRead;
+                totalBytesRead += bytesRead;
+
+                // check for \r\n\r\n
+                if (bytesRead < 4) continue;
+                var memory = new Memory<byte>(buffer, totalBytesRead - 4, 4);
+                if (memory.Span[memory.Length - 1] == 10 && memory.Span[memory.Length - 2] == 13 &&
+                    memory.Span[memory.Length - 3] == 10 && memory.Span[memory.Length - 4] == 13) break;
+            }
+
+            var allBytes = new Memory<byte>(buffer, 0, totalBytesRead);
+            ArrayPool<byte>.Shared.Return(buffer);
+            return allBytes.ToArray();
+        }
+
+        static async Task<string> ReceiveHttpRequestText(Stream sourceStream, int bufferSize, CancellationToken cancellationToken)
         {
             var buffer = ArrayPool<byte>.Shared.Rent(bufferSize);
             var bufferIndex = 0;
