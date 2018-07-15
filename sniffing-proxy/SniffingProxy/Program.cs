@@ -219,10 +219,14 @@ namespace SniffingProxy
         {
             var clientSslStream = new SslStream(clientStream, true);
             await clientSslStream.AuthenticateAsServerAsync(fakeCert, false, SslProtocols.Tls, true);
-            var remoteClient = new TcpClient(request.Host, request.Port);
-            var remoteStream = remoteClient.GetStream();
-            var remoteSslStream = new SslStream(remoteStream, true);
-            await remoteSslStream.AuthenticateAsClientAsync(request.Host);
+
+
+            var httpsClient = await CustomHttpsClient.CreateWithoutProxy(request.Host, request.Port);
+
+            // var remoteClient = new TcpClient(request.Host, request.Port);
+            // var remoteStream = remoteClient.GetStream();
+            // var remoteSslStream = new SslStream(remoteStream, true);
+            // await remoteSslStream.AuthenticateAsClientAsync(request.Host);
 
             // var clientBuffer = new byte[receiveBufferSize];
 
@@ -233,31 +237,32 @@ namespace SniffingProxy
             //     await remoteSslStream.WriteAsync(clientBuffer, 0, clientBytesRead);
             // }
 
-            while (true)
-            {
-                var requestBytes = await ReceiveHttpRequestBytes(clientSslStream, receiveBufferSize * 2, cancellationToken);
-                var tempText = Encoding.UTF8.GetString(requestBytes);
-                await remoteSslStream.WriteAsync(requestBytes, 0, requestBytes.Length);
+            var requestBytes = await ReceiveHttpRequestBytes(clientSslStream, receiveBufferSize * 2, cancellationToken);
+            var tempText = Encoding.UTF8.GetString(requestBytes);
+            // await remoteSslStream.WriteAsync(requestBytes, 0, requestBytes.Length);
+            var res = await httpsClient.HandleSend(tempText);
 
-                var responseBytes = await ReceiveHttpRequestBytes(remoteSslStream, receiveBufferSize * 2, cancellationToken);
-                var tempText2 = Encoding.UTF8.GetString(responseBytes);
-                await remoteSslStream.WriteAsync(responseBytes, 0, responseBytes.Length);
+            var x = 5;
 
-                // var remoteBuffer = new byte[receiveBufferSize];
-                // var remoteBytesRead = -1;
-                // var counter = 0;
-                // while (remoteBytesRead != 0)
-                // {
-                //     remoteBytesRead = await remoteSslStream.ReadAsync(remoteBuffer, 0, remoteBuffer.Length);
-                //     await clientSslStream.WriteAsync(remoteBuffer, 0, remoteBytesRead);
-                //     if (counter == 48)
-                //     {
 
-                //     }
-                //     counter++;
-                // }
-                // var x = 5;
-            }
+            // var responseBytes = await ReceiveHttpRequestBytesSimple(remoteSslStream, receiveBufferSize * 2, cancellationToken);
+            // var tempText2 = Encoding.UTF8.GetString(responseBytes);
+            // await remoteSslStream.WriteAsync(responseBytes, 0, responseBytes.Length);
+
+            // var remoteBuffer = new byte[receiveBufferSize];
+            // var remoteBytesRead = -1;
+            // var counter = 0;
+            // while (remoteBytesRead != 0)
+            // {
+            //     remoteBytesRead = await remoteSslStream.ReadAsync(remoteBuffer, 0, remoteBuffer.Length);
+            //     await clientSslStream.WriteAsync(remoteBuffer, 0, remoteBytesRead);
+            //     if (counter == 48)
+            //     {
+
+            //     }
+            //     counter++;
+            // }
+            // var x = 5;
 
 
             // var requestText = await ReceiveHttpRequestText(sslStream, receiveBufferSize, cancellationToken);
@@ -289,6 +294,14 @@ namespace SniffingProxy
         //     memory = memory.Slice(0, bytesRead);
         //     return memory.ToArray();
         // }
+
+        static async Task<byte[]> ReceiveHttpRequestBytesSimple(Stream sourceStream, int bufferSize, CancellationToken cancellationToken = default)
+        {
+            var buffer = new byte[bufferSize];
+            var bytesRead = await sourceStream.ReadAsync(buffer);
+            var slice = buffer.AsMemory(0, bytesRead);
+            return slice.ToArray();
+        }
 
         static async Task<byte[]> ReceiveHttpRequestBytes(Stream sourceStream, int bufferSize, CancellationToken cancellationToken)
         {

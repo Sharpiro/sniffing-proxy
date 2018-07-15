@@ -5,10 +5,12 @@ using System.Net;
 using System.Net.Security;
 using System.Net.Sockets;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace SniffingProxy.Core
 {
+    // Currently doing 1 CustomHttpsClient per connection
     public class CustomHttpsClient
     {
         private readonly Uri _proxyUri;
@@ -16,19 +18,28 @@ namespace SniffingProxy.Core
         private SslStream _remoteSslStream;
         private int _clientReceiveBufferSize;
 
-        public CustomHttpsClient(string proxyUrl)
+        public string _host { get; }
+        public int _port { get; }
+
+        public CustomHttpsClient(string host, int port, string proxyUrl = null)
         {
-            _proxyUri = new Uri(proxyUrl);
+            _host = host;
+            _port = port;
+            if (proxyUrl != null) _proxyUri = new Uri(proxyUrl);
         }
 
-        public async Task HandleConnect(string requestText, Request request)
+        public async Task HandleConnect()
         {
+            if (_remoteSslStream != null) throw new InvalidOperationException("The remote ssl stream has already been initialized");
+
+            // var connectRequest = "CONNECT raw.githubusercontent.com:443 HTTP/1.1\r\nHost: raw.githubusercontent.com:443\r\n\r\n";
+            var connectRequest = $"CONNECT ${_host}:${_port} HTTP/1.1\r\nHost: ${_host}:${_port}\r\n\r\n";
             _client = new TcpClient(_proxyUri.Host, _proxyUri.Port);
             var remoteStream = _client.GetStream();
 
             _clientReceiveBufferSize = _client.ReceiveBufferSize;
 
-            await remoteStream.WriteAsync(Encoding.UTF8.GetBytes(requestText));
+            await remoteStream.WriteAsync(Encoding.UTF8.GetBytes(connectRequest));
 
             var buffer = new byte[_clientReceiveBufferSize];
             var bytesRead = await remoteStream.ReadAsync(buffer, 0, buffer.Length);
@@ -36,58 +47,72 @@ namespace SniffingProxy.Core
             var connectionResponse = Encoding.UTF8.GetString(bufferSlice.Span);
 
 
-            _remoteSslStream = new SslStream(remoteStream, false);
-            await _remoteSslStream.AuthenticateAsClientAsync(request.Host);
+            _remoteSslStream = new SslStream(remoteStream);
+            await _remoteSslStream.AuthenticateAsClientAsync(_host);
         }
 
-        public async Task<string> HandleGet(string requestText, Request request)
+        public async Task<string> HandleSend(string requestText)
         {
             await _remoteSslStream.WriteAsync(Encoding.UTF8.GetBytes(requestText));
 
-            var buffer = new byte[_clientReceiveBufferSize];
-            var bytesRead = await _remoteSslStream.ReadAsync(buffer, 0, buffer.Length);
-            var bufferSlice = new Memory<byte>(buffer, 0, bytesRead);
-            var responseHeadersText = Encoding.UTF8.GetString(bufferSlice.Span);
-            var responseHeaders = ParseRawHttp(responseHeadersText);
+            // var buffer = new byte[_clientReceiveBufferSize];
+            // var bytesRead = await _remoteSslStream.ReadAsync(buffer, 0, buffer.Length);
+            // var bufferSlice = new Memory<byte>(buffer, 0, bytesRead);
+            var buffer = await HttpData.ReceiveUpToHeaders(_remoteSslStream, _clientReceiveBufferSize, CancellationToken.None);
+            var initialRawHttpResponse = Encoding.UTF8.GetString(buffer);
+            var httpData = HttpData.ParseRawHttp(initialRawHttpResponse);
 
-            var totalBytesRead = 0;
-            var contentBytes = Enumerable.Empty<byte>();
-            var contentlength = int.Parse(responseHeaders["content-length"]);
-            while (totalBytesRead < contentlength)
+            if (HttpData.TryGetContentLength(httpData, out int contentLength))
             {
-                bytesRead = await _remoteSslStream.ReadAsync(buffer, 0, buffer.Length);
-                totalBytesRead += bytesRead;
-                bufferSlice = new Memory<byte>(buffer, 0, bytesRead);
-                contentBytes = contentBytes.Concat(bufferSlice.ToArray());
+                var remaining = HttpData.ParseByContentLength(_remoteSslStream, _clientReceiveBufferSize, contentLength);
+            }
+            else
+            {
+                var contentSlice = buffer.AsSpan(buffer.Length - httpData.ContentLength).ToArray();
+                var remaining = HttpData.ParseByTransferEncoding(_remoteSslStream, _clientReceiveBufferSize, contentSlice);
             }
 
-            var content = Encoding.UTF8.GetString(contentBytes.ToArray());
-            return content;
+
+            // var totalBytesRead = httpData.ContentLength;
+            // IEnumerable<byte> contentBytes = contentSlice.ToArray();
+            // // var expectedContentlength = int.Parse(httpData.Headers["content-length"]);
+            // var expectedContentlength = int.Parse(httpData.HeadersList.Single(h => h.Key == "content-length").Value);
+            // while (totalBytesRead < expectedContentlength)
+            // {
+            //     bytesRead = await _remoteSslStream.ReadAsync(buffer, 0, buffer.Length);
+            //     totalBytesRead += bytesRead;
+            //     bufferSlice = new Memory<byte>(buffer, 0, bytesRead);
+            //     contentBytes = contentBytes.Concat(bufferSlice.ToArray());
+            // }
+
+            // var content = Encoding.UTF8.GetString(contentBytes.ToArray());
+            // return content;
+
+            throw new NotImplementedException();
         }
 
-        public static Dictionary<string, string> ParseRawHttp(string requestText)
+        public async Task InitializeWithoutProxy(string host, int port)
         {
-            var prefixToEnd = requestText.Split("\r\n", 2);
-            var prefixLine = prefixToEnd[0];
-            var headersAndBody = prefixToEnd[1].Split("\r\n\r\n");
-            var headersText = headersAndBody[0];
-            var headerLines = headersText.Split("\r\n");
-            var prefixData = prefixLine.Split(" ");
-            var parsedheaders = headerLines.Skip(1).Where(l => !string.IsNullOrEmpty(l)).Select(l => l.Split(':', 2, StringSplitOptions.RemoveEmptyEntries).Select(s => s.Trim()));
-            var headersDictionary = parsedheaders.ToDictionary(kvp => kvp.First(), kvp => kvp.Last(), StringComparer.InvariantCultureIgnoreCase);
-            // var hostAndPort = headersDictionary["host"].Split(":");
-            // var request = new Request
-            // {
-            //     Method = prefixData[0],
-            //     Path = prefixData[1],
-            //     Version = prefixData[2],
-            //     Host = hostAndPort[0],
-            //     Port = hostAndPort.Length > 1 ? int.Parse(hostAndPort[1]) : -1,
-            //     Headers = headersDictionary,
-            //     Body = headersAndBody[1]
-            // };
-            // var jsonRequest = Newtonsoft.Json.JsonConvert.SerializeObject(request);
-            return headersDictionary;
+            _client = new TcpClient(host, port);
+            _clientReceiveBufferSize = _client.ReceiveBufferSize;
+            var remoteStream = _client.GetStream();
+            _remoteSslStream = new SslStream(remoteStream);
+            await _remoteSslStream.AuthenticateAsClientAsync(host);
+        }
+
+        public static async Task<CustomHttpsClient> CreateWithoutProxy(string host, int port)
+        {
+            var httpsClient = new CustomHttpsClient(host, port);
+            await httpsClient.InitializeWithoutProxy(host, port);
+            return httpsClient;
+        }
+
+
+        public static async Task<CustomHttpsClient> CreateWithProxy(string host, int port, string proxyUrl)
+        {
+            var httpsClient = new CustomHttpsClient(host, port, proxyUrl);
+            await httpsClient.HandleConnect();
+            return httpsClient;
         }
     }
 }
