@@ -1,6 +1,8 @@
 using System;
 using System.Buffers;
+using System.Buffers.Text;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -16,8 +18,8 @@ namespace SniffingProxy.Core
         // public string Version { get; set; }
         // public string Host { get; set; }
         // public int Port { get; set; }
-        private static byte[] _crLfBuffer = new byte[] { 13, 10, 13, 10 };
-        private static byte[] _crBuffer = new byte[] { 13, 10 };
+        private static byte[] _doubleCRLFBuffer = new byte[] { 13, 10, 13, 10 };
+        private static byte[] _CRLFBuffer = new byte[] { 13, 10 };
         public Dictionary<string, string> Headers { get; set; } = new Dictionary<string, string>();
         public IEnumerable<KeyValuePair<string, string>> HeadersList { get; set; }
         public int ContentLength { get; set; }
@@ -80,47 +82,12 @@ namespace SniffingProxy.Core
 
                 // check for \r\n\r\n
                 if (bytesRead < 4) continue;
-                endOfHeadersIndex = buffer.AsSpan(0, bytesRead).IndexOf(_crLfBuffer);
+                endOfHeadersIndex = buffer.AsSpan(0, bytesRead).IndexOf(_doubleCRLFBuffer);
                 if (endOfHeadersIndex >= 0) break;
             }
 
             var allBytesBuffer = allBytesEnumerable.ToArray();
             return allBytesBuffer;
-        }
-
-
-        public static async Task<byte[]> ParseByContentLength(Stream sourceStream, int bufferSize, int remainingBytes)
-        {
-            var buffer = new byte[bufferSize];
-            var allBytes = Enumerable.Empty<byte>();
-            var allBytesRead = 0;
-            while (allBytesRead < remainingBytes)
-            {
-                var bytesRead = await sourceStream.ReadAsync(buffer);
-                allBytesRead += bytesRead;
-                allBytes = allBytes.Concat(buffer.AsSpan(0, bytesRead).ToArray());
-            }
-
-            return allBytes.ToArray();
-        }
-
-        public static async Task<byte[]> ParseByTransferEncoding(Stream sourceStream, int bufferSize, Memory<byte> startOfBody)
-        {
-            var text = Encoding.UTF8.GetString(startOfBody.Span);
-            var chunkSize = startOfBody.Span.IndexOf(_crBuffer);
-            var data = startOfBody.Span.Slice(0, chunkSize).ToArray();
-            throw new NotImplementedException();
-            // var buffer = new byte[bufferSize];
-            // var allBytes = Enumerable.Empty<byte>();
-            // var allBytesRead = 0;
-            // while (allBytesRead < remainingBytes)
-            // {
-            //     var bytesRead = await sourceStream.ReadAsync(buffer);
-            //     allBytesRead += bytesRead;
-            //     allBytes = allBytes.Concat(buffer.AsSpan(0, bytesRead).ToArray());
-            // }
-
-            // return allBytes.ToArray();
         }
     }
 }

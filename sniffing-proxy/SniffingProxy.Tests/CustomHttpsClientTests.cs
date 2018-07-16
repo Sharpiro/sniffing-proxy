@@ -2,6 +2,8 @@ using System;
 using Xunit;
 using SniffingProxy.Core;
 using System.Threading.Tasks;
+using System.IO;
+using System.Text;
 
 namespace SniffingProxy.Tests
 {
@@ -21,14 +23,8 @@ namespace SniffingProxy.Tests
         }
 
         [Fact]
-        public async Task SendTest()
+        public async Task ContentLengthTest()
         {
-
-            // //connect
-            // const string connectRequestText = "CONNECT raw.githubusercontent.com:443 HTTP/1.1\r\nHost: raw.githubusercontent.com:443\r\n\r\n";
-            // var parsedConnectRequest = Request.Parse(connectRequestText);
-            // customHttpsClient.HandleConnect(connectRequestText, parsedConnectRequest).Wait();
-
             const string host = "raw.githubusercontent.com";
             const int port = 443;
             const string getRequestText = "GET /Sharpiro/Tools/9d490ac97f54388f415c61f4c1889ece00bd169e/interactive_scripts/csi/main.csx HTTP/1.1\r\nHost: raw.githubusercontent.com\r\n\r\n";
@@ -36,6 +32,32 @@ namespace SniffingProxy.Tests
             var customHttpsClient = await GetClient(host, port);
             // var parsedGetRequest = Request.Parse(getRequestText);
             await customHttpsClient.HandleSend(getRequestText);
+        }
+
+        [Fact]
+        public async Task TransferEncodingTest()
+        {
+            const string host = "github.com";
+            const int port = 443;
+            const string getRequestText = "GET /Sharpiro/Tools/blob/9d490ac97f54388f415c61f4c1889ece00bd169e/interactive_scripts/csi/main.csx HTTP/1.1\r\nHost: github.com\r\n\r\n";
+
+            var customHttpsClient = await GetClient(host, port);
+            // var parsedGetRequest = Request.Parse(getRequestText);
+            await customHttpsClient.HandleSend(getRequestText);
+        }
+
+        [Fact]
+        public async Task TransferEncodingTest2()
+        {
+            // const string data = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nTransfer-Encoding: chunked\r\n\r\n7\r\nMozilla\r\n9\r\nDeveloper\r\n7\r\nNetwork\r\n0\r\n\r\n";
+            const string data = "7\r\nMozilla\r\n9\r\nDeveloper\r\n7\r\nNetwork\r\n0\r\n\r\n";
+            //  var httpData = HttpData.ParseRawHttp(data);
+
+            var encodingService = new EncodingService();
+            var memoryStream = new MemoryStream(Encoding.UTF8.GetBytes(data));
+            
+            
+            var remaining = await encodingService.TransferEncoding(memoryStream, 65536);
         }
 
         private async Task<CustomHttpsClient> GetClient(string host, int port)

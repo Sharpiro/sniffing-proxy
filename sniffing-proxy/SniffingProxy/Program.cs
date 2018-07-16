@@ -23,12 +23,14 @@ namespace SniffingProxy
 {
     class Program
     {
-        // private const string rootCertSerialNumber = "00CC78A90D47D8159A";
-        private const string rootCertSerialNumber = "00ed57f3562fd3d663";
+        private const string rootCertSerialNumber = "00CC78A90D47D8159A";
+        // private const string rootCertSerialNumber = "00ed57f3562fd3d663";
 
         private static HttpClient _httpClient;
         private static TcpListener _tcpServer;
         private static CertificateService _certificateService = new CertificateService();
+        private static string _proxyUrl = Environment.GetEnvironmentVariable("http_proxy");
+
 
         static async Task Main(string[] args)
         {
@@ -38,7 +40,6 @@ namespace SniffingProxy
                 const string localIp = "127.0.0.1";
                 const int localPort = 5000;
 
-                var proxyUrl = Environment.GetEnvironmentVariable("http_proxy");
                 var httpClientHandler = new HttpClientHandler
                 {
                     // Proxy = new WebProxy(proxyUrl),
@@ -80,6 +81,9 @@ namespace SniffingProxy
                 var cancellationTokenSource = new CancellationTokenSource();
                 var request = await ReceiveRequest(clientStream, client.ReceiveBufferSize, cancellationTokenSource.Token);
                 Console.WriteLine("Client connected");
+                // var fakeCert = _certificateService.CreateFakeCertificate(request.Host, rootCertSerialNumber);
+                // await HandleHttpsRequest(clientStream, request, client.ReceiveBufferSize, fakeCert, cancellationTokenSource.Token);
+
                 switch (request.Method)
                 {
                     case "CONNECT":
@@ -217,33 +221,18 @@ namespace SniffingProxy
 
         static async Task HandleHttpsRequest(Stream clientStream, Request request, int receiveBufferSize, X509Certificate2 fakeCert, CancellationToken cancellationToken)
         {
-            var clientSslStream = new SslStream(clientStream, true);
+            // authenticate as server
+            var clientSslStream = new SslStream(clientStream, false);
             await clientSslStream.AuthenticateAsServerAsync(fakeCert, false, SslProtocols.Tls, true);
 
-
-            var httpsClient = await CustomHttpsClient.CreateWithoutProxy(request.Host, request.Port);
-
-            // var remoteClient = new TcpClient(request.Host, request.Port);
-            // var remoteStream = remoteClient.GetStream();
-            // var remoteSslStream = new SslStream(remoteStream, true);
-            // await remoteSslStream.AuthenticateAsClientAsync(request.Host);
-
-            // var clientBuffer = new byte[receiveBufferSize];
-
-            // var clientBytesRead = -1;
-            // while (clientBytesRead != 0)
-            // {
-            //     clientBytesRead = await clientSslStream.ReadAsync(clientBuffer, 0, clientBuffer.Length);
-            //     await remoteSslStream.WriteAsync(clientBuffer, 0, clientBytesRead);
-            // }
-
+            // receive http request from client
             var requestBytes = await ReceiveHttpRequestBytes(clientSslStream, receiveBufferSize * 2, cancellationToken);
-            var tempText = Encoding.UTF8.GetString(requestBytes);
-            // await remoteSslStream.WriteAsync(requestBytes, 0, requestBytes.Length);
-            var res = await httpsClient.HandleSend(tempText);
+            var requestText = Encoding.UTF8.GetString(requestBytes);
 
-            var x = 5;
-
+            // initialize https client, connect via proxy if necessary
+            var httpsClient = await CustomHttpsClient.CreateWithProxy(request.Host, request.Port, _proxyUrl);
+            // send request to remote
+            var res = await httpsClient.HandleSend(requestText);
 
             // var responseBytes = await ReceiveHttpRequestBytesSimple(remoteSslStream, receiveBufferSize * 2, cancellationToken);
             // var tempText2 = Encoding.UTF8.GetString(responseBytes);
