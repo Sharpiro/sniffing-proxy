@@ -1,6 +1,7 @@
 using System;
 using System.Buffers.Text;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -65,27 +66,52 @@ namespace SniffingProxy
             }
 
             (var chunkStart, var chunkLength, var throwawayBytes) = PeekChunk(startOfBody.Span);
+            var totalBytesRead = startOfBody.Length - chunkStart;
             // var totalBytesRead = startOfBody.Length;
-            var totalChunkRead = startOfBody.Length - chunkStart;
             // var totalBytesToRead = (chunkLength - totalBytesRead) + 500;
 
             IEnumerable<byte> allBytes = startOfBody.ToArray();
-            IEnumerable<byte> contentBytes = startOfBody.Slice(chunkStart).ToArray();
-            int remainingBytes;
-            while ((remainingBytes = chunkLength + throwawayBytes - totalChunkRead) > 0)
+            // IEnumerable<byte> contentBytes = startOfBody.Slice(chunkStart).ToArray();
+            // int remainingBytes;
+            // while ((remainingBytes = chunkLength + throwawayBytes - totalChunkRead) > 0)
             // while (totalChunkRead < chunkLength + throwawayBytes)
+            while (true)
             {
-                // var remainingBytes = chunkLength + throwawayBytes - totalChunkRead;
-                var bytesRead = await sourceStream.ReadAsync(buffer, 0, remainingBytes);
-                totalChunkRead += bytesRead;
-                var slice = buffer.AsMemory(0, bytesRead);
-                allBytes = allBytes.Concat(slice.ToArray());
-                contentBytes = contentBytes.Concat(slice.ToArray());
+                // var remainingBytes = chunkLength + throwawayBytes - totalBytesRead;
+                var bytesRead = await sourceStream.ReadAsync(buffer, 0, buffer.Length);
+                Debug.WriteLine($"Received '{bytesRead}' bytes");
+                if (bytesRead == 5454)
+                {
+
+                }
+                totalBytesRead += bytesRead;
+                if (totalBytesRead >= chunkLength + throwawayBytes)
+                {
+                    var remainingBytes = chunkLength + throwawayBytes - (totalBytesRead - bytesRead);
+                    var slice = buffer.AsMemory(0, remainingBytes);
+                    var temp = Encoding.UTF8.GetString(slice.Span);
+                    allBytes = allBytes.Concat(slice.ToArray());
+                    // contentBytes = contentBytes.Concat(slice.ToArray());
+
+                    slice = buffer.AsMemory(remainingBytes, bytesRead - remainingBytes);
+                    (chunkStart, chunkLength, throwawayBytes) = PeekChunk(slice.Span);
+                    allBytes = allBytes.Concat(slice.ToArray());
+                    totalBytesRead = slice.Length - chunkStart;
+                    // totalBytesRead = slice.Length;
+                    if (chunkLength == 0) break;
+                }
+                else
+                {
+                    var slice = buffer.AsMemory(0, bytesRead);
+                    allBytes = allBytes.Concat(slice.ToArray());
+                    // contentBytes = contentBytes.Concat(slice.ToArray());
+                }
             }
-            contentBytes = contentBytes.Take(chunkLength);
+            // contentBytes = contentBytes;
             var allText = Encoding.UTF8.GetString(allBytes.ToArray());
-            var allContentText = Encoding.UTF8.GetString(contentBytes.ToArray());
-            throw new NotImplementedException();
+            // var allContentText = Encoding.UTF8.GetString(contentBytes.ToArray());
+            return null;
+            //throw new NotImplementedException();
         }
 
         private (int start, int length, int throwawayBytes) PeekChunk(Span<byte> span)

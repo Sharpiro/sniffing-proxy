@@ -4,6 +4,7 @@ using SniffingProxy.Core;
 using System.Threading.Tasks;
 using System.IO;
 using System.Text;
+using System.Diagnostics;
 
 namespace SniffingProxy.Tests
 {
@@ -43,7 +44,11 @@ namespace SniffingProxy.Tests
 
             var customHttpsClient = await GetClient(host, port);
             // var parsedGetRequest = Request.Parse(getRequestText);
-            await customHttpsClient.HandleSend(getRequestText);
+            for (var i = 0; i < 500; i++)
+            {
+                await customHttpsClient.HandleSend(getRequestText);
+                Debug.WriteLine("----------complete-------------");
+            }
         }
 
         [Fact]
@@ -55,8 +60,8 @@ namespace SniffingProxy.Tests
 
             var encodingService = new EncodingService();
             var memoryStream = new MemoryStream(Encoding.UTF8.GetBytes(data));
-            
-            
+
+
             var remaining = await encodingService.TransferEncoding(memoryStream, 65536);
         }
 

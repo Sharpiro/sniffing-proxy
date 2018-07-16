@@ -69,6 +69,11 @@ namespace SniffingProxy.Core
             }
             else
             {
+                if (!initialRawHttpResponse.Contains("Transfer-Encoding: chunked"))
+                {
+                    throw new Exception("invalid encoding");
+                }
+
                 var contentSlice = buffer.AsSpan(buffer.Length - httpData.ContentLength).ToArray();
                 var encodingService = new EncodingService();
                 var remaining = await encodingService.TransferEncoding(RemoteSslStream, _clientReceiveBufferSize, contentSlice);
@@ -90,7 +95,8 @@ namespace SniffingProxy.Core
             // var content = Encoding.UTF8.GetString(contentBytes.ToArray());
             // return content;
 
-            throw new NotImplementedException();
+            return null;
+            //throw new NotImplementedException();
         }
 
         public async Task InitializeWithoutProxy(string host, int port)
