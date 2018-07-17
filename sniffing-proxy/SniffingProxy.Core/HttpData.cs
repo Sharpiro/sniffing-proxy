@@ -67,7 +67,7 @@ namespace SniffingProxy.Core
 
         public static bool TryGetContentLength(HttpData httpData, out int contentLength)
         {
-            return int.TryParse(httpData.HeadersList.SingleOrDefault(h => h.Key == "content-length").Value, out contentLength);
+            return int.TryParse(httpData.HeadersList.SingleOrDefault(h => h.Key == "Content-Length").Value, out contentLength);
         }
 
         public static async Task<byte[]> ReceiveUpToHeaders(Stream sourceStream, int bufferSize, CancellationToken cancellationToken)

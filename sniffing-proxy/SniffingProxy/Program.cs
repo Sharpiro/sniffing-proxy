@@ -232,7 +232,9 @@ namespace SniffingProxy
             // initialize https client, connect via proxy if necessary
             var httpsClient = await CustomHttpsClient.CreateWithProxy(request.Host, request.Port, _proxyUrl);
             // send request to remote
-            var res = await httpsClient.HandleSend(requestText);
+            var rawResponse = await httpsClient.HandleSend(requestText);
+
+            await clientSslStream.WriteAsync(rawResponse, cancellationToken);
 
             // var responseBytes = await ReceiveHttpRequestBytesSimple(remoteSslStream, receiveBufferSize * 2, cancellationToken);
             // var tempText2 = Encoding.UTF8.GetString(responseBytes);

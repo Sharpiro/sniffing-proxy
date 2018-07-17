@@ -51,7 +51,7 @@ namespace SniffingProxy.Core
             await RemoteSslStream.AuthenticateAsClientAsync(_host);
         }
 
-        public async Task<string> HandleSend(string requestText)
+        public async Task<byte[]> HandleSend(string requestText)
         {
             await RemoteSslStream.WriteAsync(Encoding.UTF8.GetBytes(requestText));
 
@@ -62,10 +62,11 @@ namespace SniffingProxy.Core
             var initialRawHttpResponse = Encoding.UTF8.GetString(buffer);
             var httpData = HttpData.ParseRawHttp(initialRawHttpResponse);
 
+            byte[] rawResponse;
             if (HttpData.TryGetContentLength(httpData, out int contentLength))
             {
                 var encodingService = new ContentLengthService();
-                var remaining = encodingService.ParseByContentLength(RemoteSslStream, _clientReceiveBufferSize, contentLength);
+                rawResponse = await encodingService.ParseByContentLength(RemoteSslStream, _clientReceiveBufferSize, contentLength);
             }
             else
             {
@@ -76,8 +77,10 @@ namespace SniffingProxy.Core
 
                 var contentSlice = buffer.AsSpan(buffer.Length - httpData.ContentLength).ToArray();
                 var encodingService = new EncodingService();
-                var remaining = await encodingService.TransferEncoding(RemoteSslStream, _clientReceiveBufferSize, contentSlice);
+                rawResponse = await encodingService.TransferEncoding(RemoteSslStream, _clientReceiveBufferSize, contentSlice);
             }
+
+            var headersSlice = buffer.AsSpan(0, buffer.Length - httpData.ContentLength).ToArray();
 
 
             // var totalBytesRead = httpData.ContentLength;
@@ -95,8 +98,9 @@ namespace SniffingProxy.Core
             // var content = Encoding.UTF8.GetString(contentBytes.ToArray());
             // return content;
 
-            return null;
-            //throw new NotImplementedException();
+            var fullResponse = headersSlice.Concat(rawResponse).ToArray();
+            var fullResText = Encoding.UTF8.GetString(fullResponse);
+            return fullResponse;
         }
 
         public async Task InitializeWithoutProxy(string host, int port)

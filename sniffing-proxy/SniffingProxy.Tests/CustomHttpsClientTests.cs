@@ -54,7 +54,6 @@ namespace SniffingProxy.Tests
         [Fact]
         public async Task TransferEncodingTest2()
         {
-            // const string data = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nTransfer-Encoding: chunked\r\n\r\n7\r\nMozilla\r\n9\r\nDeveloper\r\n7\r\nNetwork\r\n0\r\n\r\n";
             const string data = "7\r\nMozilla\r\n9\r\nDeveloper\r\n7\r\nNetwork\r\n0\r\n\r\n";
             //  var httpData = HttpData.ParseRawHttp(data);
 

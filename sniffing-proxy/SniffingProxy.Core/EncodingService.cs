@@ -52,10 +52,12 @@ namespace SniffingProxy
             }
         }
 
-        public async Task<object> TransferEncoding(Stream sourceStream, int bufferSize, Memory<byte> startOfBody = default)
+        public async Task<byte[]> TransferEncodingHard(Stream sourceStream, int bufferSize, Memory<byte> startOfBody = default)
         {
+            const int zeroDataChunkPostfix = 5;
             var buffer = new byte[bufferSize];
             // IEnumerable<byte> allBytes;
+            var backupStartOfBody = Encoding.UTF8.GetString(startOfBody.Span);
 
             if (startOfBody.Length == 0)
             {
@@ -75,16 +77,21 @@ namespace SniffingProxy
             // int remainingBytes;
             // while ((remainingBytes = chunkLength + throwawayBytes - totalChunkRead) > 0)
             // while (totalChunkRead < chunkLength + throwawayBytes)
+            var count = 0;
             while (true)
             {
                 // var remainingBytes = chunkLength + throwawayBytes - totalBytesRead;
                 var bytesRead = await sourceStream.ReadAsync(buffer, 0, buffer.Length);
-                Debug.WriteLine($"Received '{bytesRead}' bytes");
-                if (bytesRead == 5454)
-                {
-
-                }
                 totalBytesRead += bytesRead;
+                Debug.WriteLine($"Received {bytesRead} bytes: '{totalBytesRead}/{chunkLength}' @ count '{++count}'");
+                //if (count == 9 && bytesRead >= 8190 && bytesRead <= 8299)
+                //{
+                //    var tempText = Encoding.UTF8.GetString(buffer.AsSpan(0, bytesRead));
+                //}
+                //if (bytesRead >= 5450 && bytesRead <= 5459)
+                //{
+
+                //}
                 if (totalBytesRead >= chunkLength + throwawayBytes)
                 {
                     var remainingBytes = chunkLength + throwawayBytes - (totalBytesRead - bytesRead);
@@ -93,12 +100,15 @@ namespace SniffingProxy
                     allBytes = allBytes.Concat(slice.ToArray());
                     // contentBytes = contentBytes.Concat(slice.ToArray());
 
-                    slice = buffer.AsMemory(remainingBytes, bytesRead - remainingBytes);
-                    (chunkStart, chunkLength, throwawayBytes) = PeekChunk(slice.Span);
-                    allBytes = allBytes.Concat(slice.ToArray());
-                    totalBytesRead = slice.Length - chunkStart;
+                    var slice2 = buffer.AsMemory(remainingBytes, bytesRead - remainingBytes);
+                    var temp2 = Encoding.UTF8.GetString(slice2.Span);
+
+                    (chunkStart, chunkLength, throwawayBytes) = PeekChunk(slice2.Span);
+                    allBytes = allBytes.Concat(slice2.ToArray());
+                    totalBytesRead = slice2.Length - chunkStart;
                     // totalBytesRead = slice.Length;
                     if (chunkLength == 0) break;
+                    if (chunkLength == totalBytesRead - throwawayBytes - zeroDataChunkPostfix) break; // last chunk had zero data chunk as well
                 }
                 else
                 {
@@ -110,7 +120,7 @@ namespace SniffingProxy
             // contentBytes = contentBytes;
             var allText = Encoding.UTF8.GetString(allBytes.ToArray());
             // var allContentText = Encoding.UTF8.GetString(contentBytes.ToArray());
-            return null;
+            return allBytes.ToArray();
             //throw new NotImplementedException();
         }
 
@@ -120,6 +130,49 @@ namespace SniffingProxy
             var chunkSlice = span.Slice(0, endOfNumberIndex);
             var result = Utf8Parser.TryParse(chunkSlice, out int length, out int bytesConsumed, 'x');
             return (_CRLFBuffer.Length + bytesConsumed, length, _CRLFBuffer.Length);
+        }
+
+        public async Task<byte[]> TransferEncoding(Stream sourceStream, int bufferSize, Memory<byte> startOfBody = default)
+        {
+            var buffer = new byte[bufferSize];
+            var allBytes = Enumerable.Empty<byte>();
+            var isFinalChunk = false;
+            while (!isFinalChunk)
+            {
+                var chunkLength = await ReadChunkLength();
+                if (chunkLength == 0) isFinalChunk = true;
+                var chunkBytesRead = 0;
+                while (chunkBytesRead < chunkLength + 2)
+                {
+                    var remaining = chunkLength + 2 - chunkBytesRead;
+                    var bytesRead = await sourceStream.ReadAsync(buffer, 0, remaining);
+                    chunkBytesRead += bytesRead;
+
+                    var bytesReadSlice = buffer.AsMemory(0, bytesRead);
+                    var sliceTemp = Encoding.UTF8.GetString(bytesReadSlice.Span);
+                    allBytes = allBytes.Concat(bytesReadSlice.ToArray());
+                }
+            }
+
+            var tempAllText = Encoding.UTF8.GetString(allBytes.ToArray());
+            return allBytes.ToArray();
+
+            async Task<int> ReadChunkLength()
+            {
+                var index = 0;
+                //while (buffer[index] != 13)
+                while (true)
+                {
+                    await sourceStream.ReadAsync(buffer, index, 1);
+                    if (buffer[index] == 10) break;
+                    index++;
+                }
+                var chunkSlice = buffer.AsMemory(0, index - 1);
+                var result = Utf8Parser.TryParse(chunkSlice.Span, out int length, out int bytesConsumed, 'x');
+                var allSlice = buffer.AsMemory(0, index + 1);
+                allBytes = allBytes.Concat(allSlice.ToArray());
+                return length;
+            }
         }
     }
 }
