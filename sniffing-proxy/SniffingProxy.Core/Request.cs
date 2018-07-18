@@ -16,7 +16,11 @@ namespace SniffingProxy.Core
 
         public static Request Parse(string requestText)
         {
-            var prefixToEnd =requestText.Split("\r\n", 2);
+            if (string.IsNullOrEmpty(requestText))
+            {
+                throw new Exception("request text was null");
+            }
+            var prefixToEnd = requestText.Split("\r\n", 2);
             var prefixLine = prefixToEnd[0];
             var headersAndBody = prefixToEnd[1].Split("\r\n\r\n");
             var headersText = headersAndBody[0];
@@ -24,7 +28,9 @@ namespace SniffingProxy.Core
             var prefixData = prefixLine.Split(" ");
             var parsedheaders = headerLines.Where(l => !string.IsNullOrEmpty(l)).Select(l => l.Split(':', 2, StringSplitOptions.RemoveEmptyEntries).Select(s => s.Trim()));
             var headersDictionary = parsedheaders.ToDictionary(kvp => kvp.First(), kvp => kvp.Last(), StringComparer.InvariantCultureIgnoreCase);
-            var hostAndPort = headersDictionary["host"].Split(":");
+            // var hostAndPort = headersDictionary["host"].Split(":");
+            var portColonIndex = prefixData[1].LastIndexOf(':');
+            var hostAndPort = prefixData[1].Split(":");
             var request = new Request
             {
                 Method = prefixData[0],

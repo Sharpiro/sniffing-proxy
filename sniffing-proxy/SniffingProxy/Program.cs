@@ -24,7 +24,7 @@ namespace SniffingProxy
     class Program
     {
         // private const string rootCertSerialNumber = "00CC78A90D47D8159A";
-        private const string rootCertSerialNumber = "00ed57f3562fd3d663";
+        private const string rootCertSerialNumber = "0093a3b2e3719990af";
 
         private static HttpClient _httpClient;
         private static TcpListener _tcpServer;
@@ -79,7 +79,9 @@ namespace SniffingProxy
             {
                 var clientStream = client.GetStream();
                 var cancellationTokenSource = new CancellationTokenSource();
-                var request = await ReceiveRequest(clientStream, client.ReceiveBufferSize, cancellationTokenSource.Token);
+                var requestText = await ReceiveRequest(clientStream, client.ReceiveBufferSize, cancellationTokenSource.Token);
+                var request = Request.Parse(requestText);
+
                 Console.WriteLine("Client connected");
                 // var fakeCert = _certificateService.CreateFakeCertificate(request.Host, rootCertSerialNumber);
                 // await HandleHttpsRequest(clientStream, request, client.ReceiveBufferSize, fakeCert, cancellationTokenSource.Token);
@@ -99,10 +101,13 @@ namespace SniffingProxy
                         //  throw new ArgumentOutOfRangeException("Invalid request method");
                 }
             }
-            catch (Exception ex)
+            catch (IOException ex)
             {
                 // Console.Error.WriteLine(ex);
                 Console.WriteLine("Client disconnected");
+            }
+            catch (Exception ex)
+            {
             }
         }
 
@@ -146,15 +151,14 @@ namespace SniffingProxy
             return requestText;
         }
 
-        static async Task<Request> ReceiveRequest(NetworkStream clientStream, int receiveBufferSize, CancellationToken cancellationToken)
+        static async Task<string> ReceiveRequest(NetworkStream clientStream, int receiveBufferSize, CancellationToken cancellationToken)
         {
             var buffer = ArrayPool<byte>.Shared.Rent(receiveBufferSize);
             var clientMemory = buffer.AsMemory();
 
             var bytesRead = await clientStream.ReadAsync(clientMemory, cancellationToken);
             var requestText = Encoding.UTF8.GetString(clientMemory.Slice(0, bytesRead).Span);
-            var request = Request.Parse(requestText);
-            return request;
+            return requestText;
         }
 
         static async Task HandleHttpConnection(Stream stream, int receiveBufferSize, Request request, CancellationToken cancellationToken)
@@ -164,6 +168,10 @@ namespace SniffingProxy
             while (true)
             {
                 var requestText = await ReceiveHttpRequestText(stream, receiveBufferSize, cancellationToken);
+                if (string.IsNullOrEmpty(requestText))
+                {
+                    throw new Exception("request was empty");
+                }
                 request = Request.Parse(requestText);
                 response = await HandleRequest("http", request, cancellationToken);
                 await stream.WriteAsync(response);

@@ -12,9 +12,11 @@ namespace SniffingProxy.Core
         {
             var userStore = new X509Store(StoreName.Root, StoreLocation.CurrentUser);
             userStore.Open(OpenFlags.MaxAllowed);
+            // var otherCert = userStore.Certificates.Cast<X509Certificate2>().First().SubjectName;
             var rootCert = userStore.Certificates.Cast<X509Certificate2>().Single(c => c.SerialNumber.Equals(rootCertSerialNumber, StringComparison.InvariantCultureIgnoreCase));
-            using (var rsa = RSA.Create(2048))
+            using (var rsa = RSA.Create(4096))
             {
+                // var req = new CertificateRequest($"CN={fakeCN}, O=Github, L=San Francisco, C=US", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
                 var req = new CertificateRequest($"CN={fakeCN}", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
 
                 req.CertificateExtensions.Add(new X509BasicConstraintsExtension(false, false, 0, false));
@@ -25,8 +27,16 @@ namespace SniffingProxy.Core
                      }, true));
                 req.CertificateExtensions.Add(new X509SubjectKeyIdentifierExtension(req.PublicKey, false));
 
+                var sanBuilder = new SubjectAlternativeNameBuilder();
+                sanBuilder.AddDnsName("githubusercontent.com");
+                sanBuilder.AddDnsName("*.githubusercontent.com");
+                var sanExtension = sanBuilder.Build();
+                req.CertificateExtensions.Add(sanExtension);
+
                 // https://github.com/dotnet/corefx/issues/24454#issuecomment-388231655
-                var corruptFakeCert = req.Create(rootCert, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddDays(90), new byte[] { 1, 2, 3, 4 }).CopyWithPrivateKey(rsa);
+                var serialNumber = new byte[16];
+                new System.Security.Cryptography.RNGCryptoServiceProvider().GetBytes(serialNumber);
+                var corruptFakeCert = req.Create(rootCert, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddDays(90), serialNumber).CopyWithPrivateKey(rsa);
                 var fixedFakeCert = new X509Certificate2(corruptFakeCert.Export(X509ContentType.Pkcs12));
 
                 return fixedFakeCert;

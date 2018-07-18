@@ -13,15 +13,10 @@ namespace SniffingProxy.Core
 {
     public class HttpData
     {
-        // public string Method { get; set; }
-        // public string Path { get; set; }
-        // public string Version { get; set; }
-        // public string Host { get; set; }
-        // public int Port { get; set; }
         public Dictionary<string, string> Headers { get; set; } = new Dictionary<string, string>();
         public IEnumerable<KeyValuePair<string, string>> HeadersList { get; set; }
         public int ContentLength { get; set; }
-        // public string Body { get; set; }
+        public int StatusCode { get; set; }
 
         public static HttpData ParseRawHttp(string requestText)
         {
@@ -40,6 +35,7 @@ namespace SniffingProxy.Core
             var headersText = headersAndBody[0];
             var headerLines = headersText.Split("\r\n");
             var prefixData = prefixLine.Split(" ");
+            var statusCode = int.Parse(prefixData[1]);
             var parsedheaders = headerLines.Select(l => l.Split(':', 2).Select(s => s.Trim()).ToArray());
             var headersKvp = parsedheaders.Select(h => KeyValuePair.Create(h[0], h[1]));
             // var headersDictionary = parsedheaders.ToDictionary(kvp => kvp.First(), kvp => kvp.Last(), StringComparer.InvariantCultureIgnoreCase);
@@ -58,6 +54,7 @@ namespace SniffingProxy.Core
             return new HttpData
             {
                 // Headers = headersDictionary,
+                StatusCode = statusCode,
                 HeadersList = headersKvp,
                 ContentLength = expectedBodyLength
             };

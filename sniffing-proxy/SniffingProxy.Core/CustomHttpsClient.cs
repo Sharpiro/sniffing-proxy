@@ -60,6 +60,11 @@ namespace SniffingProxy.Core
             var initialRawHttpResponse = Encoding.UTF8.GetString(buffer);
             var httpData = HttpData.ParseRawHttp(initialRawHttpResponse);
 
+            if (httpData.StatusCode == 304)
+            {
+                return buffer;
+            }
+
             byte[] rawResponse;
             if (int.TryParse(httpData.HeadersList.SingleOrDefault(h => h.Key == "Content-Length").Value, out int contentLength))
             {

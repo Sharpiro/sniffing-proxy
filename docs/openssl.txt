@@ -1,6 +1,7 @@
-openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365
+// openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365
 
 openssl req -x509 -newkey rsa:2048 -keyout domain.key -out domain.crt -days 365 -nodes
+openssl req -x509 -newkey rsa:2048 -subj '/CN=localhost' -keyout domain.key -out domain.crt -days 365 -nodes
 
 
 openssl pkcs12 -export -out domain.name.pfx -inkey domain.key -in domain.crt -passout pass:
