@@ -18,8 +18,6 @@ namespace SniffingProxy.Core
         // public string Version { get; set; }
         // public string Host { get; set; }
         // public int Port { get; set; }
-        private static byte[] _doubleCRLFBuffer = new byte[] { 13, 10, 13, 10 };
-        private static byte[] _CRLFBuffer = new byte[] { 13, 10 };
         public Dictionary<string, string> Headers { get; set; } = new Dictionary<string, string>();
         public IEnumerable<KeyValuePair<string, string>> HeadersList { get; set; }
         public int ContentLength { get; set; }
@@ -42,7 +40,7 @@ namespace SniffingProxy.Core
             var headersText = headersAndBody[0];
             var headerLines = headersText.Split("\r\n");
             var prefixData = prefixLine.Split(" ");
-            var parsedheaders = headerLines.Skip(1).Where(l => !string.IsNullOrEmpty(l)).Select(l => l.Split(':', 2, StringSplitOptions.RemoveEmptyEntries).Select(s => s.Trim()).ToArray());
+            var parsedheaders = headerLines.Select(l => l.Split(':', 2).Select(s => s.Trim()).ToArray());
             var headersKvp = parsedheaders.Select(h => KeyValuePair.Create(h[0], h[1]));
             // var headersDictionary = parsedheaders.ToDictionary(kvp => kvp.First(), kvp => kvp.Last(), StringComparer.InvariantCultureIgnoreCase);
             // var hostAndPort = headersDictionary["host"].Split(":");
@@ -63,31 +61,6 @@ namespace SniffingProxy.Core
                 HeadersList = headersKvp,
                 ContentLength = expectedBodyLength
             };
-        }
-
-        public static bool TryGetContentLength(HttpData httpData, out int contentLength)
-        {
-            return int.TryParse(httpData.HeadersList.SingleOrDefault(h => h.Key == "Content-Length").Value, out contentLength);
-        }
-
-        public static async Task<byte[]> ReceiveUpToHeaders(Stream sourceStream, int bufferSize, CancellationToken cancellationToken)
-        {
-            var buffer = new byte[bufferSize];
-            var allBytesEnumerable = Enumerable.Empty<byte>();
-            int endOfHeadersIndex;
-            while (!cancellationToken.IsCancellationRequested)
-            {
-                var bytesRead = await sourceStream.ReadAsync(buffer, cancellationToken);
-                allBytesEnumerable = allBytesEnumerable.Concat(buffer.AsSpan(0, bytesRead).ToArray());
-
-                // check for \r\n\r\n
-                if (bytesRead < 4) continue;
-                endOfHeadersIndex = buffer.AsSpan(0, bytesRead).IndexOf(_doubleCRLFBuffer);
-                if (endOfHeadersIndex >= 0) break;
-            }
-
-            var allBytesBuffer = allBytesEnumerable.ToArray();
-            return allBytesBuffer;
         }
     }
 }

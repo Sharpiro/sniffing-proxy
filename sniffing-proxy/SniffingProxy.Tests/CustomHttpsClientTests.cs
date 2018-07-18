@@ -54,14 +54,15 @@ namespace SniffingProxy.Tests
         [Fact]
         public async Task TransferEncodingTest2()
         {
-            const string data = "7\r\nMozilla\r\n9\r\nDeveloper\r\n7\r\nNetwork\r\n0\r\n\r\n";
-            //  var httpData = HttpData.ParseRawHttp(data);
+            const string expectedData = "7\r\nMozilla\r\n9\r\nDeveloper\r\n7\r\nNetwork\r\n0\r\n\r\n";
+            var memoryStream = new MemoryStream(Encoding.UTF8.GetBytes(expectedData));
 
-            var encodingService = new EncodingService();
-            var memoryStream = new MemoryStream(Encoding.UTF8.GetBytes(data));
+            var encodingService = new TransferEncodingService();
 
 
             var remaining = await encodingService.TransferEncoding(memoryStream, 65536);
+            var actualData = Encoding.UTF8.GetString(remaining);
+            Assert.Equal(expectedData, actualData);
         }
 
         private async Task<CustomHttpsClient> GetClient(string host, int port)

@@ -55,15 +55,13 @@ namespace SniffingProxy.Core
         {
             await RemoteSslStream.WriteAsync(Encoding.UTF8.GetBytes(requestText));
 
-            // var buffer = new byte[_clientReceiveBufferSize];
-            // var bytesRead = await _remoteSslStream.ReadAsync(buffer, 0, buffer.Length);
-            // var bufferSlice = new Memory<byte>(buffer, 0, bytesRead);
-            var buffer = await HttpData.ReceiveUpToHeaders(RemoteSslStream, _clientReceiveBufferSize, CancellationToken.None);
+            var headresService = new HeadersService();
+            var buffer = await headresService.ReceiveUpToHeaders(RemoteSslStream, _clientReceiveBufferSize, CancellationToken.None);
             var initialRawHttpResponse = Encoding.UTF8.GetString(buffer);
             var httpData = HttpData.ParseRawHttp(initialRawHttpResponse);
 
             byte[] rawResponse;
-            if (HttpData.TryGetContentLength(httpData, out int contentLength))
+            if (int.TryParse(httpData.HeadersList.SingleOrDefault(h => h.Key == "Content-Length").Value, out int contentLength))
             {
                 var encodingService = new ContentLengthService();
                 rawResponse = await encodingService.ParseByContentLength(RemoteSslStream, _clientReceiveBufferSize, contentLength);
@@ -76,27 +74,11 @@ namespace SniffingProxy.Core
                 }
 
                 var contentSlice = buffer.AsSpan(buffer.Length - httpData.ContentLength).ToArray();
-                var encodingService = new EncodingService();
+                var encodingService = new TransferEncodingService();
                 rawResponse = await encodingService.TransferEncoding(RemoteSslStream, _clientReceiveBufferSize, contentSlice);
             }
 
             var headersSlice = buffer.AsSpan(0, buffer.Length - httpData.ContentLength).ToArray();
-
-
-            // var totalBytesRead = httpData.ContentLength;
-            // IEnumerable<byte> contentBytes = contentSlice.ToArray();
-            // // var expectedContentlength = int.Parse(httpData.Headers["content-length"]);
-            // var expectedContentlength = int.Parse(httpData.HeadersList.Single(h => h.Key == "content-length").Value);
-            // while (totalBytesRead < expectedContentlength)
-            // {
-            //     bytesRead = await _remoteSslStream.ReadAsync(buffer, 0, buffer.Length);
-            //     totalBytesRead += bytesRead;
-            //     bufferSlice = new Memory<byte>(buffer, 0, bytesRead);
-            //     contentBytes = contentBytes.Concat(bufferSlice.ToArray());
-            // }
-
-            // var content = Encoding.UTF8.GetString(contentBytes.ToArray());
-            // return content;
 
             var fullResponse = headersSlice.Concat(rawResponse).ToArray();
             var fullResText = Encoding.UTF8.GetString(fullResponse);
