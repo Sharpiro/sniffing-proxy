@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Buffers;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net;
@@ -24,7 +25,15 @@ namespace SniffingProxy
         private static TcpListener _tcpServer;
         private static CertificateService _certificateService = new CertificateService();
         private static readonly string _proxyUrl = Environment.GetEnvironmentVariable("http_proxy");
-        private static readonly ConcurrentBag<int> _clientBag = new ConcurrentBag<int>();
+        private static int _clientCount;
+        private static readonly object _lock = new object();
+        private static readonly List<string> _acceptedHosts = new List<string>
+        {
+            "raw.githubusercontent.com",
+            "github.com",
+            "www.youtube.com"
+        };
+        private static readonly ConcurrentDictionary<string, ClientInfo> _clients = new ConcurrentDictionary<string, ClientInfo>();
 
         static async Task Main(string[] args)
         {
@@ -40,7 +49,6 @@ namespace SniffingProxy
                 {
                     var clientConnection = await _tcpServer.AcceptTcpClientAsync();
                     AcceptClient(clientConnection);
-
                 }
             }
             catch (Exception ex)
@@ -50,27 +58,41 @@ namespace SniffingProxy
             }
         }
 
-        static async void AcceptClient(TcpClient client)
+        static async Task AcceptClient(TcpClient client)
         {
-            _clientBag.Add(0);
-            var clientId = _clientBag.Count;
+            var clientId = 0;
+            ClientInfo clientInfo = null;
             try
             {
-                var clientIdStream = client.GetIdStream(clientId);
-                var cancellationTokenSource = new CancellationTokenSource();
-                var requestText = await ReceiveRequest(clientIdStream.Stream, client.ReceiveBufferSize, cancellationTokenSource.Token);
+                var clientStream = client.GetStream();
+                var cancellationTokenSource = new CancellationTokenSource(15 * 1000);
+                var requestText = await ReceiveRequest(clientStream, client.ReceiveBufferSize, cancellationTokenSource.Token);
                 var request = Request.Parse(requestText);
+
+                //if (!_acceptedHosts.Any(ah => request.Host.Contains(ah)))
+                //{
+                //    client.Dispose();
+                //    return;
+                //}
+
+                lock (_lock)
+                {
+                    _clientCount++;
+                    clientId = _clientCount;
+                }
+                clientInfo = client.AsClientInfo(clientId);
+                //_clients.TryAdd()
 
                 switch (request.Method)
                 {
                     case "CONNECT":
                         var httpsClient = await GetClient(request.Host, request.Port);
-                        await HandleConnectRequest(clientIdStream, client.ReceiveBufferSize, request, cancellationTokenSource.Token);
-                        WriteLine($"Client '{clientIdStream.Id}' connected for: '{request.HostAndPort}'");
+                        await HandleConnectRequest(clientInfo, client.ReceiveBufferSize, request, cancellationTokenSource.Token);
+                        WriteLine($"Client '{clientInfo.Id}: {clientInfo.Remote}' connected for: '{request.HostAndPort}'");
                         using (var fakeCert = _certificateService.CreateFakeCertificate(request.Host, rootCertSerialNumber))
                         {
-                            var clientSslStream = await AuthenticateAsServer(clientIdStream, fakeCert);
-                            await HandleHttpsRequests(clientSslStream, request, client.ReceiveBufferSize, httpsClient, fakeCert, cancellationTokenSource.Token);
+                            clientInfo = await AuthenticateAsServer(clientInfo, fakeCert);
+                            await HandleHttpsRequests(clientInfo, request, client.ReceiveBufferSize, httpsClient, fakeCert);
                         }
                         break;
                     default:
@@ -80,6 +102,11 @@ namespace SniffingProxy
             catch (IOException ex)
             {
                 WriteLine($"Client '{clientId}' disconnected");
+                clientInfo?.Dispose();
+                lock (_lock)
+                {
+                    _clientCount--;
+                }
             }
             catch (Exception ex)
             {
@@ -96,35 +123,37 @@ namespace SniffingProxy
             return requestText;
         }
 
-        static async Task HandleConnectRequest(IdStream clientStream, int receiveBufferSize, Request request, CancellationToken cancellationToken)
+        static async Task HandleConnectRequest(ClientInfo clientStream, int receiveBufferSize, Request request, CancellationToken cancellationToken)
         {
             var responseMemory = "HTTP/1.1 200 Connection established\r\n\r\n".AsMemory();
             await WriteResponse(clientStream.Stream, responseMemory, cancellationToken);
         }
 
-        static async Task<IdStream> AuthenticateAsServer(IdStream clientStream, X509Certificate2 fakeCert)
+        static async Task<ClientInfo> AuthenticateAsServer(ClientInfo clientStream, X509Certificate2 fakeCert)
         {
             var clientSslStream = new SslStream(clientStream.Stream);
             await clientSslStream.AuthenticateAsServerAsync(fakeCert, false, SslProtocols.Tls, true);
-            return clientSslStream.AsIdStream(clientStream.Id);
+            return clientSslStream.AsClientInfo(clientStream.Id);
         }
 
-        static async Task HandleHttpsRequests(IdStream clientSslStream, Request request, int receiveBufferSize, CustomHttpsClient httpsClient, X509Certificate2 fakeCert, CancellationToken cancellationToken)
+        static async Task HandleHttpsRequests(ClientInfo clientSslStream, Request request, int receiveBufferSize, CustomHttpsClient httpsClient, X509Certificate2 fakeCert)
         {
             while (true)
             {
+                var cts = new CancellationTokenSource(15 * 1000);
                 // receive http request from client
-                var requestBytes = await ReceiveHttpRequestBytes(clientSslStream.Stream, receiveBufferSize * 2, cancellationToken);
+                var requestBytes = await ReceiveHttpRequestBytes(clientSslStream.Stream, receiveBufferSize * 2, cts.Token);
                 var requestText = Encoding.UTF8.GetString(requestBytes);
 
                 var line = new string(requestText.Replace("\r\n\r\n", "").Replace("\r\n", " ").Take(95).ToArray());
+                //var line = requestText.Replace("\r\n\r\n", "").Replace("\r\n", " ");
                 WriteLine($"client '{clientSslStream.Id}' req: '{line}'");
 
                 // send request to remote
                 var rawResponse = await httpsClient.HandleSend(requestText);
 
                 // forward response to client
-                await clientSslStream.Stream.WriteAsync(rawResponse, cancellationToken);
+                await clientSslStream.Stream.WriteAsync(rawResponse, cts.Token);
             }
         }
 
@@ -139,7 +168,7 @@ namespace SniffingProxy
             var buffer = ArrayPool<byte>.Shared.Rent(bufferSize);
             var bufferIndex = 0;
             var totalBytesRead = 0;
-            while (!cancellationToken.IsCancellationRequested)
+            while (true)
             {
                 var bytesRead = await sourceStream.ReadAsync(buffer, bufferIndex, buffer.Length - bufferIndex, cancellationToken);
                 bufferIndex = bytesRead;

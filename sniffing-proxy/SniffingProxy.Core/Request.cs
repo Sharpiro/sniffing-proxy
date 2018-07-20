@@ -29,6 +29,7 @@ namespace SniffingProxy.Core
             var prefixData = prefixLine.Split(" ");
             var parsedheaders = headerLines.Where(l => !string.IsNullOrEmpty(l)).Select(l => l.Split(':', 2, StringSplitOptions.RemoveEmptyEntries).Select(s => s.Trim()));
             var headersDictionary = parsedheaders.ToDictionary(kvp => kvp.First(), kvp => kvp.Last(), StringComparer.InvariantCultureIgnoreCase);
+            var body = headersAndBody.Length > 1 ? headersAndBody[1] : null;
             var portColonIndex = prefixData[1].LastIndexOf(':');
             var hostAndPort = prefixData[1].Split(":");
             if (prefixData[1].StartsWith("http"))
@@ -44,7 +45,7 @@ namespace SniffingProxy.Core
                 Port = hostAndPort.Length > 1 ? int.Parse(hostAndPort[1]) : -1,
                 HostAndPort = prefixData[1],
                 Headers = headersDictionary,
-                Body = headersAndBody[1]
+                Body = body
             };
             return request;
         }

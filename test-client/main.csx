@@ -6,7 +6,7 @@ using System.Net.Sockets;
 
 const string proxyUrl = "http://localhost:5000/";
 // var proxyUrl = Environment.GetEnvironmentVariable("http_proxy");
-const string httpUrl = "http://www.httpvshttps.com/";
+// const string httpUrl = "http://www.httpvshttps.com/";
 // const string httpsUrl = "https://raw.githubusercontent.com/Sharpiro/Tools/master/.gitignore";
 // const string requestUrl = "https://raw.githubusercontent.com/Sharpiro/Tools/9d490ac97f54388f415c61f4c1889ece00bd169e/interactive_scripts/csi/main.csx";
 // const string requestUrl = "https://github.com/Sharpiro/Tools/blob/9d490ac97f54388f415c61f4c1889ece00bd169e/interactive_scripts/csi/main.csx";
