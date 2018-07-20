@@ -1,14 +1,10 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <LangVersion>latest</LangVersion>
     <TargetFramework>netcoreapp2.1</TargetFramework>
   </PropertyGroup>
-
-  <ItemGroup>
-    <PackageReference Include="newtonsoft.json" Version="11.0.2" />
-  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\SniffingProxy.Core\SniffingProxy.Core.csproj" />

@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Net.Security;
@@ -18,8 +17,8 @@ namespace SniffingProxy.Core
         public SslStream RemoteSslStream { get; private set; }
         private int _clientReceiveBufferSize;
 
-        public string _host { get; }
-        public int _port { get; }
+        private string _host { get; }
+        private int _port { get; }
 
         public CustomHttpsClient(string host, int port, string proxyUrl = null)
         {
@@ -32,7 +31,6 @@ namespace SniffingProxy.Core
         {
             if (RemoteSslStream != null) throw new InvalidOperationException("The remote ssl stream has already been initialized");
 
-            // var connectRequest = "CONNECT raw.githubusercontent.com:443 HTTP/1.1\r\nHost: raw.githubusercontent.com:443\r\n\r\n";
             var connectRequest = $"CONNECT {_host}:{_port} HTTP/1.1\r\nHost: {_host}:{_port}\r\n\r\n";
             _client = new TcpClient(_proxyUri.Host, _proxyUri.Port);
             var remoteStream = _client.GetStream();
@@ -60,7 +58,13 @@ namespace SniffingProxy.Core
             var initialRawHttpResponse = Encoding.UTF8.GetString(buffer);
             var httpData = HttpData.ParseRawHttp(initialRawHttpResponse);
 
-            if (httpData.StatusCode == 304)
+            if (httpData.StatusCode == (int)HttpStatusCode.NotModified)
+            {
+                return buffer;
+            }
+
+
+            if (httpData.StatusCode == (int)HttpStatusCode.Continue)
             {
                 return buffer;
             }
