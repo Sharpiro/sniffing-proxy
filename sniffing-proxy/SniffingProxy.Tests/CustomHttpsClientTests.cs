@@ -15,11 +15,12 @@ namespace SniffingProxy.Tests
         {
             const string host = "raw.githubusercontent.com";
             const int port = 443;
+            const string version = "HTTP/1.1";
             // const string requestText = "CONNECT raw.githubusercontent.com:443 HTTP/1.1\r\nHost: raw.githubusercontent.com:443\r\n\r\n";
             // var parsedRequest = Request.Parse(requestText);
             var proxyUrl = Environment.GetEnvironmentVariable("http_proxy");
             // var customHttpsClient = await CustomHttpsClient.CreateWithProxy(host, port, proxyUrl);
-            var customHttpsClient = new CustomHttpsClient(host, port, proxyUrl);
+            var customHttpsClient = new CustomHttpsClient(host, port, version, proxyUrl);
             await customHttpsClient.HandleConnect();
         }
 
@@ -67,8 +68,9 @@ namespace SniffingProxy.Tests
 
         private async Task<CustomHttpsClient> GetClient(string host, int port)
         {
+            const string version = "HTTP/1.1";
             var proxyUrl = Environment.GetEnvironmentVariable("http_proxy");
-            return proxyUrl == null ? await CustomHttpsClient.CreateWithoutProxy(host, port) : await CustomHttpsClient.CreateWithProxy(host, port, proxyUrl);
+            return proxyUrl == null ? await CustomHttpsClient.CreateWithoutProxy(host, port, version) : await CustomHttpsClient.CreateWithProxy(host, port, version, proxyUrl);
         }
     }
 }

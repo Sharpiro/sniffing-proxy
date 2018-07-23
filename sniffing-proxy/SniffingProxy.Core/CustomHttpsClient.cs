@@ -10,28 +10,30 @@ using System.Threading.Tasks;
 namespace SniffingProxy.Core
 {
     // Currently doing 1 CustomHttpsClient per connection
-    public class CustomHttpsClient
+    public class CustomHttpsClient : IDisposable
     {
         private readonly Uri _proxyUri;
         private TcpClient _client;
-        public SslStream RemoteSslStream { get; private set; }
+        private SslStream _remoteSslStream;
         private int _clientReceiveBufferSize;
 
         private string _host { get; }
         private int _port { get; }
+        private string _version { get; }
 
-        public CustomHttpsClient(string host, int port, string proxyUrl = null)
+        public CustomHttpsClient(string host, int port, string version, string proxyUrl = null)
         {
             _host = host;
             _port = port;
+            _version = version;
             if (proxyUrl != null) _proxyUri = new Uri(proxyUrl);
         }
 
         public async Task HandleConnect()
         {
-            if (RemoteSslStream != null) throw new InvalidOperationException("The remote ssl stream has already been initialized");
+            if (_remoteSslStream != null) throw new InvalidOperationException("The remote ssl stream has already been initialized");
 
-            var connectRequest = $"CONNECT {_host}:{_port} HTTP/1.1\r\nHost: {_host}:{_port}\r\n\r\n";
+            var connectRequest = $"CONNECT {_host}:{_port} {_version}\r\nHost: {_host}:{_port}\r\n\r\n";
             _client = new TcpClient(_proxyUri.Host, _proxyUri.Port);
             var remoteStream = _client.GetStream();
 
@@ -45,16 +47,16 @@ namespace SniffingProxy.Core
             var connectionResponse = Encoding.UTF8.GetString(bufferSlice.Span);
 
 
-            RemoteSslStream = new SslStream(remoteStream);
-            await RemoteSslStream.AuthenticateAsClientAsync(_host);
+            _remoteSslStream = new SslStream(remoteStream);
+            await _remoteSslStream.AuthenticateAsClientAsync(_host);
         }
 
         public async Task<byte[]> HandleSend(string requestText)
         {
-            await RemoteSslStream.WriteAsync(Encoding.UTF8.GetBytes(requestText));
+            await _remoteSslStream.WriteAsync(Encoding.UTF8.GetBytes(requestText));
 
             var headresService = new HeadersService();
-            var buffer = await headresService.ReceiveUpToHeaders(RemoteSslStream, _clientReceiveBufferSize, CancellationToken.None);
+            var buffer = await headresService.ReceiveUpToHeaders(_remoteSslStream, _clientReceiveBufferSize, CancellationToken.None);
             var initialRawHttpResponse = Encoding.UTF8.GetString(buffer);
             var httpData = HttpData.ParseRawHttp(initialRawHttpResponse);
 
@@ -73,7 +75,7 @@ namespace SniffingProxy.Core
             if (int.TryParse(httpData.HeadersList.SingleOrDefault(h => h.Key == "Content-Length").Value, out int contentLength))
             {
                 var encodingService = new ContentLengthService();
-                rawResponse = await encodingService.ParseByContentLength(RemoteSslStream, _clientReceiveBufferSize, contentLength);
+                rawResponse = await encodingService.ParseByContentLength(_remoteSslStream, _clientReceiveBufferSize, contentLength);
             }
             else
             {
@@ -84,7 +86,7 @@ namespace SniffingProxy.Core
 
                 var contentSlice = buffer.AsSpan(buffer.Length - httpData.ContentLength).ToArray();
                 var encodingService = new TransferEncodingService();
-                rawResponse = await encodingService.TransferEncoding(RemoteSslStream, _clientReceiveBufferSize, contentSlice);
+                rawResponse = await encodingService.TransferEncoding(_remoteSslStream, _clientReceiveBufferSize, contentSlice);
             }
 
             var headersSlice = buffer.AsSpan(0, buffer.Length - httpData.ContentLength).ToArray();
@@ -99,21 +101,27 @@ namespace SniffingProxy.Core
             _client = new TcpClient(host, port);
             _clientReceiveBufferSize = _client.ReceiveBufferSize;
             var remoteStream = _client.GetStream();
-            RemoteSslStream = new SslStream(remoteStream);
-            await RemoteSslStream.AuthenticateAsClientAsync(host);
+            _remoteSslStream = new SslStream(remoteStream);
+            await _remoteSslStream.AuthenticateAsClientAsync(host);
         }
 
-        public static async Task<CustomHttpsClient> CreateWithoutProxy(string host, int port)
+        public void Dispose()
         {
-            var httpsClient = new CustomHttpsClient(host, port);
+            _client?.Dispose();
+            _remoteSslStream?.Dispose();
+        }
+
+        public static async Task<CustomHttpsClient> CreateWithoutProxy(string host, int port, string version)
+        {
+            var httpsClient = new CustomHttpsClient(host, port, version);
             await httpsClient.InitializeWithoutProxy(host, port);
             return httpsClient;
         }
 
 
-        public static async Task<CustomHttpsClient> CreateWithProxy(string host, int port, string proxyUrl)
+        public static async Task<CustomHttpsClient> CreateWithProxy(string host, int port, string version, string proxyUrl)
         {
-            var httpsClient = new CustomHttpsClient(host, port, proxyUrl);
+            var httpsClient = new CustomHttpsClient(host, port, version, proxyUrl);
             await httpsClient.HandleConnect();
             return httpsClient;
         }

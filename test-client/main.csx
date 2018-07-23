@@ -5,6 +5,7 @@ using System.Net.Http;
 using System.Net.Sockets;
 
 const string proxyUrl = "http://localhost:5000/";
+// const string proxyUrl = "http://localhost:8888/";
 // var proxyUrl = Environment.GetEnvironmentVariable("http_proxy");
 // const string httpUrl = "http://www.httpvshttps.com/";
 // const string httpsUrl = "https://raw.githubusercontent.com/Sharpiro/Tools/master/.gitignore";
@@ -43,7 +44,7 @@ foreach (var url in requestList)
     var data = await res.Content.ReadAsStringAsync();
 
     WriteLine($"success: {url}");
-    WriteLine(data);
+    // WriteLine(data);
 }
 // var res = await httpClient.GetAsync(requestUrl);
 // var res = await httpClient.GetAsync("http://www.httpvshttps.com/");
